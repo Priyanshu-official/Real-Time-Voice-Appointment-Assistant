@@ -1,0 +1,36 @@
+# ── Secrets (ADR-007: no secrets in code) ──
+.env
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+
+# ── Testing ──
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Editors / IDEs ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Docker ──
+# pgdata volume is managed by docker-compose, not committed
+pgdata/
+
+# ── uv ──
+.python-version
