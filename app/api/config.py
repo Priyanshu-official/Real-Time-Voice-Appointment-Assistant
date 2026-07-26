@@ -4,8 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     DATABASE_URL: str
-    OLLAMA_HOST: str
-    OLLAMA_MODEL: str
+    OLLAMA_HOST: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen2.5:7b-instruct-q4_K_M"
 
     model_config = SettingsConfigDict(
         env_file=".env",
