@@ -4,6 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.140.0",
+    "faster-whisper>=1.2.1",
+    "mlx-whisper>=0.4.3",
+    "pipecat-ai>=1.6.0",
+    "piper-tts>=1.6.0",
     "psycopg2-binary>=2.9.12",
     "pydantic-settings>=2.14.2",
     "sqlalchemy>=2.0.51",
