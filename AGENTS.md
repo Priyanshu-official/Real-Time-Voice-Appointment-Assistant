@@ -36,6 +36,15 @@ Don't introduce a different framework, model, or library for something already d
 - PR description must link the issue (`Closes #<number>`) and list which tests were run
 - Keep PRs small — one issue, one PR. If your change grew beyond the issue's scope, split it.
 
+## Identity and attribution
+- At the start of each work session, before your first commit, run (repo-local, not --global):
+  ```bash
+  git config user.name "Antigravity Agent"
+  git config user.email "antigravity-agent@users.noreply.github.com"
+  ```
+- Apply the `source:agent` label to every PR you open.
+- Fill in the `**Source**` line at the top of the PR description with "Antigravity agent (issue #<number>)".
+
 ## When to stop and ask instead of proceeding
 - The issue's acceptance criteria are ambiguous or contradictory
 - The task requires a schema change not already described in an ADR
