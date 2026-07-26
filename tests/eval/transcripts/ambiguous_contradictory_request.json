@@ -1,0 +1,16 @@
+{
+  "id": "amb-03",
+  "name": "Contradictory Request",
+  "category": "ambiguous",
+  "description": "User simultaneously asks to book a slot and cancel an existing appointment.",
+  "turns": [
+    {
+      "user_input": "I want to book an appointment with Dr. Smith for 2026-08-03 at 09:00, but actually I want to cancel my existing appointment."
+    }
+  ],
+  "expected": {
+    "forbidden_tools": ["book_appointment", "cancel_appointment", "reschedule_appointment"],
+    "require_verification_first": true,
+    "expected_behavior": "ask_clarifying_question"
+  }
+}
