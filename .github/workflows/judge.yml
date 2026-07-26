@@ -25,6 +25,8 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://clinic_app:ci_test_password@localhost:5432/clinic
+      OLLAMA_HOST: http://localhost:11434
+      OLLAMA_MODEL: qwen2.5:7b-instruct-q4_K_M
 
     steps:
       - name: Checkout
