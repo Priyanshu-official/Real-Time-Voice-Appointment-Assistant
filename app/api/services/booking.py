@@ -125,3 +125,217 @@ def create_appointment(
     db.commit()
     db.refresh(appt)
     return appt
+
+
+def cancel_appointment(
+    db: Session,
+    appointment_id: int,
+    patient_id: int,
+) -> Appointment:
+    """
+    Cancels an appointment for a patient.
+    Requires verified caller identity matching the patient_id on the appointment.
+    """
+    patient_exists = db.query(Patient.id).filter(Patient.id == patient_id).first()
+    audit_patient_id = patient_id if patient_exists else None
+
+    # 1. Identity check
+    verified_log = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.patient_id == patient_id,
+            AuditLog.action == "verify_identity",
+            AuditLog.allowed == True,
+        )
+        .first()
+    )
+    if not verified_log:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="cancel_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": "Unverified patient identity",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Patient identity must be verified prior to cancelling an appointment.",
+        )
+
+    # 2. Fetch appointment
+    appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not appt:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="cancel_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": f"Appointment {appointment_id} not found",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Appointment with id {appointment_id} not found.",
+        )
+
+    # 3. Ownership check: caller patient_id must match appointment patient_id
+    if appt.patient_id != patient_id:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="cancel_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": "Patient ID does not match appointment owner",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot cancel another patient's appointment.",
+        )
+
+    appt.status = "cancelled"
+
+    audit = AuditLog(
+        patient_id=audit_patient_id,
+        action="cancel_appointment",
+        allowed=True,
+        details={
+            "appointment_id": appointment_id,
+        },
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(appt)
+    return appt
+
+
+def reschedule_appointment(
+    db: Session,
+    appointment_id: int,
+    patient_id: int,
+    doctor_id: int,
+    new_start_time: datetime,
+    new_end_time: datetime,
+    reason: Optional[str] = None,
+) -> Appointment:
+    """
+    Reschedules an appointment by cancelling the old appointment and creating a new one.
+    Re-runs exclusion-constraint and working-hours checks.
+    """
+    patient_exists = db.query(Patient.id).filter(Patient.id == patient_id).first()
+    audit_patient_id = patient_id if patient_exists else None
+
+    # 1. Identity check
+    verified_log = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.patient_id == patient_id,
+            AuditLog.action == "verify_identity",
+            AuditLog.allowed == True,
+        )
+        .first()
+    )
+    if not verified_log:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="reschedule_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": "Unverified patient identity",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Patient identity must be verified prior to rescheduling an appointment.",
+        )
+
+    # 2. Fetch old appointment & check ownership
+    old_appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not old_appt:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="reschedule_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": f"Appointment {appointment_id} not found",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=404,
+            detail=f"Appointment with id {appointment_id} not found.",
+        )
+
+    if old_appt.patient_id != patient_id:
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="reschedule_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": "Patient ID does not match appointment owner",
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot reschedule another patient's appointment.",
+        )
+
+    # 3. Mark old appointment cancelled in transaction
+    old_appt.status = "cancelled"
+
+    # 4. Try creating new appointment
+    try:
+        new_appt = create_appointment(
+            db=db,
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            start_time=new_start_time,
+            end_time=new_end_time,
+            reason=reason or old_appt.reason,
+        )
+    except Exception as exc:
+        db.rollback()
+        err_detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        audit = AuditLog(
+            patient_id=audit_patient_id,
+            action="reschedule_appointment",
+            allowed=False,
+            details={
+                "appointment_id": appointment_id,
+                "error": err_detail,
+            },
+        )
+        db.add(audit)
+        db.commit()
+        raise exc
+
+    audit = AuditLog(
+        patient_id=audit_patient_id,
+        action="reschedule_appointment",
+        allowed=True,
+        details={
+            "old_appointment_id": appointment_id,
+            "new_appointment_id": new_appt.id,
+        },
+    )
+    db.add(audit)
+    db.commit()
+    return new_appt
