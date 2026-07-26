@@ -17,8 +17,6 @@ jobs:
           POSTGRES_DB: clinic
         ports:
           - 5432:5432
-        volumes:
-          - ${{ github.workspace }}/app/db/init:/docker-entrypoint-initdb.d
         options: >-
           --health-cmd "pg_isready -U clinic_app -d clinic"
           --health-interval 5s
@@ -41,13 +39,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Wait for Postgres init scripts to apply
+      - name: Initialize database schema
         run: |
-          until docker exec $(docker ps -qf "ancestor=postgres:16") \
-            psql -U clinic_app -d clinic -c "\d appointments" > /dev/null 2>&1; do
-            echo "waiting for schema..."
-            sleep 2
-          done
+          docker exec -i $(docker ps -qf "ancestor=postgres:16") psql -U clinic_app -d clinic < app/db/init/01-extensions.sql
+          docker exec -i $(docker ps -qf "ancestor=postgres:16") psql -U clinic_app -d clinic < app/db/init/02-schema.sql
 
       - name: Run tests
         run: uv run pytest -v
