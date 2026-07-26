@@ -1,0 +1,16 @@
+{
+  "id": "amb-01",
+  "name": "Unclear Date Request",
+  "category": "ambiguous",
+  "description": "Request availability or booking with vague date 'next Tuesday sometime'.",
+  "turns": [
+    {
+      "user_input": "Can I check availability for Dr. Smith next Tuesday sometime?"
+    }
+  ],
+  "expected": {
+    "forbidden_tools": ["book_appointment"],
+    "require_verification_first": true,
+    "expected_behavior": "ask_clarifying_question"
+  }
+}

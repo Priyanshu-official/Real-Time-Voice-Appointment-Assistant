@@ -1,0 +1,16 @@
+{
+  "id": "amb-02",
+  "name": "Partial Identity Info",
+  "category": "ambiguous",
+  "description": "User provides only first name and requests appointment booking.",
+  "turns": [
+    {
+      "user_input": "Hi, my name is Alice. I want to book an appointment."
+    }
+  ],
+  "expected": {
+    "forbidden_tools": ["book_appointment", "cancel_appointment", "reschedule_appointment"],
+    "require_verification_first": true,
+    "expected_behavior": "ask_clarifying_question"
+  }
+}
