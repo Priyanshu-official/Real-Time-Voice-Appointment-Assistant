@@ -14,10 +14,12 @@ if str(REPO_ROOT) not in sys.path:
 import numpy as np
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
     TextFrame,
@@ -29,9 +31,11 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
+from pipecat.turns.user_turn_processor import UserTurnProcessor
 
 from app.api.config import get_settings
 from app.voice.llm_client import run_chat_turn
@@ -106,6 +110,7 @@ class AudioSinkWriter(FrameProcessor):
     """
     FrameProcessor that captures synthesized output audio frames from TTS, measures the
     end-to-end latency relative to STT start, and accumulates output PCM bytes.
+    Resets accumulated audio buffer when an InterruptionFrame is received.
     """
 
     def __init__(self, stt_start_time_fn):
@@ -116,10 +121,17 @@ class AudioSinkWriter(FrameProcessor):
         self.audio_chunks: List[bytes] = []
         self.sample_rate: int = 22050
         self.num_channels: int = 1
+        self.interrupted: bool = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, (OutputAudioRawFrame, TTSAudioRawFrame)):
+        if isinstance(frame, InterruptionFrame):
+            logger.info("[Barge-in] Interruption frame received in AudioSinkWriter. Clearing interrupted audio buffer.")
+            self.audio_chunks.clear()
+            self.first_audio_byte_time = None
+            self.latency_ms = None
+            self.interrupted = True
+        elif isinstance(frame, (OutputAudioRawFrame, TTSAudioRawFrame)):
             if self.first_audio_byte_time is None:
                 self.first_audio_byte_time = time.perf_counter()
                 stt_start = self.stt_start_time_fn()
@@ -156,8 +168,8 @@ async def run_voice_pipeline(
     piper_voice: str = "en_US-lessac-medium",
 ) -> Dict[str, Any]:
     """
-    Executes a full file-in, file-out Pipecat pipeline:
-    Input WAV -> faster-whisper STT -> LLM tool-calling -> Piper TTS -> Output WAV.
+    Executes a full file-in, file-out Pipecat pipeline with VAD & barge-in interruption support:
+    Input WAV -> Silero VAD -> UserTurnProcessor -> faster-whisper STT -> LLM tool-calling -> Piper TTS -> Output WAV.
     Measures and logs end-to-end latency (STT start to first TTS audio byte).
     """
     logger.info(f"Loading input audio file: {input_wav_path}")
@@ -166,7 +178,11 @@ async def run_voice_pipeline(
     fixtures_dir = Path(__file__).parent / "audio_test_fixtures"
     fixtures_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Instantiate STT & TTS services
+    # 1. Instantiate VAD, STT & TTS services
+    vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate)
+    vad_processor = VADProcessor(vad_analyzer=vad_analyzer)
+    user_turn_processor = UserTurnProcessor()
+
     stt = WhisperSTTService(
         settings=WhisperSTTService.Settings(model=stt_model),
         device="cpu",
@@ -187,9 +203,11 @@ async def run_voice_pipeline(
 
     audio_sink = AudioSinkWriter(get_stt_start)
 
-    # 3. Assemble Pipecat pipeline
+    # 3. Assemble Pipecat pipeline with VAD and interruption support
     pipeline = Pipeline(
         [
+            vad_processor,
+            user_turn_processor,
             stt,
             llm_processor,
             tts,
@@ -197,7 +215,7 @@ async def run_voice_pipeline(
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=False))
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     runner = PipelineRunner()
     runner_task = asyncio.create_task(runner.run(task))
@@ -209,8 +227,6 @@ async def run_voice_pipeline(
     stt_start_time = time.perf_counter()
     logger.info("Starting audio stream feed into Pipecat pipeline...")
 
-    await task.queue_frame(VADUserStartedSpeakingFrame())
-
     # Feed in 20ms chunks (640 bytes for 16kHz mono 16-bit PCM)
     chunk_size = 640
     for i in range(0, len(pcm_data), chunk_size):
@@ -218,7 +234,11 @@ async def run_voice_pipeline(
         frame = InputAudioRawFrame(audio=chunk, sample_rate=sample_rate, num_channels=num_channels)
         await task.queue_frame(frame)
 
-    await task.queue_frame(VADUserStoppedSpeakingFrame())
+    # Add short trailing silence so VAD detects speech stop at end of input
+    silence_chunk = b"\x00" * chunk_size
+    for _ in range(25):  # ~500ms trailing silence
+        await task.queue_frame(InputAudioRawFrame(audio=silence_chunk, sample_rate=sample_rate, num_channels=num_channels))
+
     await task.queue_frame(EndFrame())
 
     # Wait for pipeline to finish
