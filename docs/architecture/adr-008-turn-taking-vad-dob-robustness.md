@@ -23,6 +23,7 @@ During live voice testing, several interaction bugs were identified:
 | `ISSUE-006` | **Minor** | System prompt speaking example date formats (*"August 22, 1992"*) to callers | `FIX-LOG-006` | Explicitly prohibit speaking example date format strings to callers in `llm_client.py` system prompt. |
 | `ISSUE-007` | **Major** | Verified session state loss causing LLM to re-ask for patient identity | `FIX-LOG-007` | Add strict persistence rule in `SYSTEM_PROMPT`: once `verify_identity` returns `verified=true`, identity is locked as verified for the rest of the session. |
 | `ISSUE-008` | **Minor** | TTS speaking lone punctuation fragments (`"."`, `"!"`, `"'"`)| `FIX-LOG-008` | Require `any(c.isalnum() for c in text)` check in `LLMToolCallingProcessor` before pushing `TextFrame` objects down to `PiperTTSService`. |
+| `ISSUE-009` | **Minor** | Short affirmations (*"Yeah"*, *"Hi"*) on first turn triggering full greeting | `FIX-LOG-009` | Add `CONTEXTUAL AFFIRMATIONS` rule in `SYSTEM_PROMPT` distinguishing initial turn greetings from mid-turn affirmative answers. |
 
 ## Decision
 
