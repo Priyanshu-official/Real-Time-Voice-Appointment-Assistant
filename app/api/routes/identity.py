@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import Optional, Union
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -13,7 +13,7 @@ router = APIRouter(tags=["identity"])
 class IdentityVerificationRequest(BaseModel):
     first_name: str
     last_name: str
-    date_of_birth: date
+    date_of_birth: Union[date, str]
 
 
 class IdentityVerificationResponse(BaseModel):

@@ -1,6 +1,7 @@
 from datetime import date
 from typing import Optional, Tuple, Union
 from dateutil import parser
+from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -15,35 +16,44 @@ def verify_patient_identity(
 ) -> Tuple[bool, Optional[int], str]:
     """
     Verifies a caller's identity against the patients table using case-insensitive match
-    on first_name, last_name, and date_of_birth.
+    on first_name, last_name, and date_of_birth, after stripping leading/trailing whitespace
+    and trailing punctuation.
 
     Writes an audit log entry for every verification attempt (allowed=True on match, allowed=False on mismatch).
 
     Returns:
         (verified: bool, patient_id: Optional[int], message: str)
     """
-    clean_first = first_name.strip()
-    clean_last = last_name.strip()
+    clean_first = first_name.strip().rstrip(".,!?").strip() if isinstance(first_name, str) else ""
+    clean_last = last_name.strip().rstrip(".,!?").strip() if isinstance(last_name, str) else ""
 
+    parsed_dob = None
     if isinstance(date_of_birth, date):
         parsed_dob = date_of_birth
+        raw_dob_str = date_of_birth.isoformat()
     elif isinstance(date_of_birth, str):
+        clean_dob_str = date_of_birth.strip().rstrip(".,!?").strip()
+        raw_dob_str = clean_dob_str
         try:
-            parsed_dob = parser.parse(date_of_birth.strip()).date()
+            parsed_dob = parser.parse(clean_dob_str).date()
         except Exception:
-            parsed_dob = date_of_birth
+            logger.warning(f"DOB unparseable: {clean_dob_str}")
+            parsed_dob = None
     else:
-        parsed_dob = date_of_birth
+        raw_dob_str = str(date_of_birth)
 
-    patient = (
-        db.query(Patient)
-        .filter(
-            func.lower(Patient.first_name) == clean_first.lower(),
-            func.lower(Patient.last_name) == clean_last.lower(),
-            Patient.date_of_birth == parsed_dob,
+    if parsed_dob is None:
+        patient = None
+    else:
+        patient = (
+            db.query(Patient)
+            .filter(
+                func.lower(Patient.first_name) == clean_first.lower(),
+                func.lower(Patient.last_name) == clean_last.lower(),
+                Patient.date_of_birth == parsed_dob,
+            )
+            .first()
         )
-        .first()
-    )
 
     if patient:
         audit = AuditLog(
@@ -67,7 +77,7 @@ def verify_patient_identity(
             details={
                 "first_name": clean_first,
                 "last_name": clean_last,
-                "date_of_birth": parsed_dob.isoformat() if hasattr(parsed_dob, "isoformat") else str(parsed_dob),
+                "date_of_birth": parsed_dob.isoformat() if (parsed_dob and hasattr(parsed_dob, "isoformat")) else raw_dob_str,
             },
         )
         db.add(audit)
