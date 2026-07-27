@@ -20,6 +20,8 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     StartFrame,
     TextFrame,
@@ -38,7 +40,7 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 
 from app.api.config import get_settings
-from app.voice.llm_client import run_chat_turn
+from app.voice.llm_client import run_chat_turn, run_chat_turn_stream
 
 settings = get_settings()
 TARGET_SAMPLE_RATE = 16000
@@ -81,8 +83,8 @@ def load_and_resample_wav(wav_path: str) -> Tuple[bytes, int, int]:
 
 class LLMToolCallingProcessor(FrameProcessor):
     """
-    Pipecat FrameProcessor that listens for TranscriptionFrames, calls `run_chat_turn`
-    from llm_client.py (which handles tool calls against FastAPI), and emits TextFrames.
+    Pipecat FrameProcessor that listens for TranscriptionFrames, streams completed sentences
+    from `run_chat_turn_stream` (which handles tool calls against FastAPI), and emits TextFrames.
     """
 
     def __init__(self, history: Optional[List[Dict[str, Any]]] = None):
@@ -98,10 +100,24 @@ class LLMToolCallingProcessor(FrameProcessor):
             if text:
                 self.transcribed_text = text
                 logger.info(f"[STT] Transcribed user audio: '{text}'")
-                response_text, self.history = run_chat_turn(self.history, text)
-                self.response_text = response_text
-                logger.info(f"[LLM] Generated response: '{response_text}'")
-                await self.push_frame(TextFrame(text=response_text), direction)
+                await self.push_frame(LLMFullResponseStartFrame(), direction)
+                gen = run_chat_turn_stream(self.history, text)
+                sentences = []
+                try:
+                    while True:
+                        sentence = next(gen)
+                        if sentence:
+                            sentences.append(sentence)
+                            logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sentence}'")
+                            await self.push_frame(TextFrame(text=sentence), direction)
+                except StopIteration as e:
+                    if e.value:
+                        full_response, self.history = e.value
+                        self.response_text = full_response
+                    else:
+                        self.response_text = " ".join(sentences)
+                await self.push_frame(LLMFullResponseEndFrame(), direction)
+                logger.info(f"[LLM] Full response completed: '{self.response_text}'")
         else:
             await self.push_frame(frame, direction)
 
@@ -186,6 +202,7 @@ async def run_voice_pipeline(
     stt = WhisperSTTService(
         settings=WhisperSTTService.Settings(model=stt_model),
         device="cpu",
+        ttfs_p99_latency=0.5,
     )
 
     tts = PiperTTSService(
