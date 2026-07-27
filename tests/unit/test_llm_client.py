@@ -278,4 +278,38 @@ def test_system_prompt_prohibits_machine_formats():
     assert "YYYY-MM-DDTHH:MM:SSZ" in SYSTEM_PROMPT
     assert "NEVER SPEAK MACHINE FORMATS OR EXAMPLE STRINGS" in SYSTEM_PROMPT
     assert "NEVER CALL A TOOL WITH INCOMPLETE OR AMBIGUOUS PARAMETERS" in SYSTEM_PROMPT
+    assert "RULE 7 — MUST EXECUTE TOOLS" in SYSTEM_PROMPT
+
+
+def test_extract_sentences_holds_back_short_exclamation_during_streaming():
+    """
+    Verifies short exclamations ("Got it!") are held back during streaming (is_final=False)
+    until merged with the following sentence, preventing isolated TTS exclamation artifacts.
+    """
+    # Streaming chunk 1: "Got it! " -> held back
+    s1, r1 = extract_sentences_from_buffer("Got it! ", is_final=False)
+    assert s1 == []
+    assert r1 == "Got it! "
+
+    # Streaming chunk 2: "Got it! To proceed, what date works best?" -> merged
+    s2, r2 = extract_sentences_from_buffer("Got it! To proceed, what date works best?", is_final=False)
+    assert len(s2) == 1
+    assert s2[0] == "Got it, to proceed, what date works best?"
+    assert r2 == ""
+
+    # Final chunk: "Got it!" (stream ends) -> yielded
+    s3, r3 = extract_sentences_from_buffer("Got it!", is_final=True)
+    assert s3 == ["Got it!"]
+
+
+def test_tools_list_contains_book_appointment():
+    """
+    Verifies book_appointment is registered in TOOLS definitions.
+    """
+    from app.voice.tools import TOOLS
+    tool_names = [t["function"]["name"] for t in TOOLS]
+    assert "book_appointment" in tool_names
+    assert "propose_booking" in tool_names
+    assert "confirm_booking" in tool_names
+
 

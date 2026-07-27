@@ -165,11 +165,46 @@ RESCHEDULE_APPOINTMENT_TOOL: Dict[str, Any] = {
     },
 }
 
+BOOK_APPOINTMENT_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "book_appointment",
+        "description": "Directly books an appointment in the database for a verified patient.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "patient_id": {
+                    "type": "integer",
+                    "description": "Verified patient ID",
+                },
+                "doctor_id": {
+                    "type": "integer",
+                    "description": "Doctor ID",
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "Appointment start timestamp in ISO 8601 format (e.g. 2026-08-03T10:00:00Z)",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "Appointment end timestamp in ISO 8601 format (e.g. 2026-08-03T10:30:00Z)",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason for the appointment",
+                },
+            },
+            "required": ["patient_id", "doctor_id", "start_time", "end_time"],
+        },
+    },
+}
+
 TOOLS: List[Dict[str, Any]] = [
     VERIFY_IDENTITY_TOOL,
     CHECK_AVAILABILITY_TOOL,
     PROPOSE_BOOKING_TOOL,
     CONFIRM_BOOKING_TOOL,
+    BOOK_APPOINTMENT_TOOL,
     CANCEL_APPOINTMENT_TOOL,
     RESCHEDULE_APPOINTMENT_TOOL,
 ]
