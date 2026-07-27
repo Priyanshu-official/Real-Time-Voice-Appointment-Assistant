@@ -104,6 +104,18 @@ When in doubt about ANY tool call parameter, prefer asking a short, specific
 clarifying question over calling the tool. A single well-placed question is
 always better than a failed tool call, an incorrect booking, or a fabricated
 value.
+
+=====================================================================
+RULE 7 — MUST EXECUTE TOOLS (NEVER PRETEND OR HALLUCINATE TOOL RESULTS)
+=====================================================================
+- You CANNOT verify identity, check availability, propose a booking, confirm a booking, cancel, or reschedule by speaking text alone.
+- You MUST invoke the corresponding tool function (`verify_identity`, `check_availability`, `propose_booking`, `confirm_booking`, `book_appointment`, `cancel_appointment`, `reschedule_appointment`).
+- Saying "I have verified your identity" or "Your appointment is booked" WITHOUT invoking the tool function is STRICTLY FORBIDDEN.
+- To book an appointment:
+  1. Once caller details (name and full DOB) are provided, call `verify_identity(first_name, last_name, date_of_birth)`.
+  2. Once verified, call `propose_booking(patient_id, doctor_id, start_time, end_time)`.
+  3. When caller confirms the proposed slot, call `confirm_booking(confirmation_token)` or `book_appointment(...)`.
+- NEVER state that an appointment has been booked or confirmed until AFTER the tool call returns status "booked"!
 """
 
 
@@ -342,13 +354,15 @@ def format_tts_text(sentences: List[str]) -> str:
     return merged
 
 
-def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
+def extract_sentences_from_buffer(buffer: str, is_final: bool = True) -> Tuple[List[str], str]:
     """
     Extracts complete sentences ending with '.', '!', '?', or newline from buffer.
     Returns (list_of_completed_sentences, remaining_buffer).
     Sanitizes each sentence, strips <think> reasoning blocks, drops punctuation-only fragments,
     and merges short 1-2 word intro exclamations (e.g. "Great!", "Sure!") into the following sentence.
     Does NOT break or mangle title abbreviations (e.g. "Dr.", "Mr.").
+    When is_final is False, holds back a trailing short 1-2 word exclamation so it can be merged
+    with the following sentence when the next chunk arrives.
     """
     # Remove complete <think>...</think> blocks from buffer
     buffer = re.sub(r"<think>.*?</think>", "", buffer, flags=re.DOTALL)
@@ -372,11 +386,19 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
                 sentences.append(sanitized)
         last_end = match.end()
 
+    # If streaming (is_final=False) and the only sentence extracted so far is a short 1-2 word intro exclamation,
+    # hold it back in the remaining buffer so it merges smoothly with the next sentence.
+    abbrevs = {"dr", "mr", "mrs", "ms", "prof", "st"}
+    if not is_final and len(sentences) == 1:
+        words = sentences[0].split()
+        clean_curr_lower = re.sub(r"[.!?]+$", "", sentences[0].lower())
+        if len(words) <= 2 and clean_curr_lower not in abbrevs:
+            return [], buffer
+
     # Merge very short 1-2 word intro exclamations (e.g. "Great!", "Sure!") with the next sentence,
     # skipping title abbreviations (e.g. "Dr.", "Mr.")
     merged = []
     i = 0
-    abbrevs = {"dr", "mr", "mrs", "ms", "prof", "st"}
     while i < len(sentences):
         curr = sentences[i]
         words = curr.split()
@@ -391,6 +413,9 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
             clean_curr = re.sub(r"[.!?]+$", "", curr)
             merged.append(f"{clean_curr}, {next_sent[0].lower()}{next_sent[1:]}")
             i += 2
+        elif not is_final and i == len(sentences) - 1 and len(words) <= 2 and clean_curr_lower not in abbrevs:
+            last_end = buffer.rfind(curr)
+            break
         else:
             merged.append(curr)
             i += 1
@@ -439,7 +464,7 @@ def run_chat_turn_stream(
             if delta_content:
                 full_content += delta_content
                 buffer += delta_content
-                sentences, buffer = extract_sentences_from_buffer(buffer)
+                sentences, buffer = extract_sentences_from_buffer(buffer, is_final=False)
                 for sentence in sentences:
                     yield sentence
 
@@ -448,10 +473,14 @@ def run_chat_turn_stream(
                 tool_calls_acc.extend(delta_tool_calls)
 
         if buffer.strip() and not tool_calls_acc:
-            sanitized_buf = sanitize_for_tts(buffer.strip())
-            if sanitized_buf:
-                yield sanitized_buf
-            buffer = ""
+            sentences, buffer = extract_sentences_from_buffer(buffer, is_final=True)
+            for sentence in sentences:
+                yield sentence
+            if buffer.strip():
+                sanitized_buf = sanitize_for_tts(buffer.strip())
+                if sanitized_buf:
+                    yield sanitized_buf
+                buffer = ""
 
         assistant_msg: Dict[str, Any] = {"role": "assistant"}
         clean_full_content = sanitize_for_tts(full_content)
