@@ -73,3 +73,23 @@ class ConversationLogger:
         self._write_line(
             f"[TOOL CALL] name={tool_name} status={status} args={redacted_args} result={redacted_result}"
         )
+        if tool_name == "verify_identity":
+            is_success = isinstance(result, dict) and result.get("verified") is True
+            self.log_eval_sample(tool_name=tool_name, args=redacted_args, success=is_success)
+
+    def log_eval_sample(self, tool_name: str, args: Dict[str, Any], success: bool):
+        """
+        Appends turn telemetry samples to logs/eval_dataset.jsonl for model evaluation.
+        """
+        import json
+        eval_path = LOG_DIR.parent / "eval_dataset.jsonl"
+        entry = {
+            "timestamp": self._get_ist_time(),
+            "call_id": self.call_id,
+            "tool_name": tool_name,
+            "args": args,
+            "success": success,
+        }
+        with open(eval_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+

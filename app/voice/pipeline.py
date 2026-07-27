@@ -50,9 +50,14 @@ class LLMToolCallingProcessor(FrameProcessor):
     from `run_chat_turn_stream` (which handles tool calls against FastAPI), and emits TextFrames.
     """
 
-    def __init__(self, history: Optional[List[Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        history: Optional[List[Dict[str, Any]]] = None,
+        logger_instance: Optional[Any] = None,
+    ):
         super().__init__()
         self.history: List[Dict[str, Any]] = history if history is not None else []
+        self.logger_instance = logger_instance
         self.transcribed_text: Optional[str] = None
         self.response_text: Optional[str] = None
 
@@ -64,7 +69,7 @@ class LLMToolCallingProcessor(FrameProcessor):
                 self.transcribed_text = text
                 logger.info(f"[STT] Transcribed user audio: '{text}'")
                 await self.push_frame(LLMFullResponseStartFrame(), direction)
-                gen = run_chat_turn_stream(self.history, text)
+                gen = run_chat_turn_stream(self.history, text, logger_instance=self.logger_instance)
                 sentences = []
                 try:
                     while True:

@@ -19,6 +19,28 @@ def _normalize_string(val: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+SPOKEN_NUMBERS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19",
+    "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50", "sixty": "60",
+    "seventy": "70", "eighty": "80", "ninety": "90"
+}
+
+
+def _normalize_spoken_date(dob_str: str) -> str:
+    """
+    Normalizes spoken date text, stripping ordinals (22nd -> 22) and converting words to numbers.
+    """
+    if not isinstance(dob_str, str):
+        return ""
+    text = re.sub(r"\b(\d+)(st|nd|rd|th)\b", r"\1", dob_str, flags=re.IGNORECASE)
+    for word, num in SPOKEN_NUMBERS.items():
+        text = re.sub(rf"\b{word}\b", num, text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def verify_patient_identity(
     db: Session,
     first_name: str,
@@ -44,7 +66,18 @@ def verify_patient_identity(
         raw_dob_str = date_of_birth.isoformat()
     elif isinstance(date_of_birth, str):
         clean_dob_str = _normalize_string(date_of_birth)
+        clean_dob_str = _normalize_spoken_date(clean_dob_str)
         raw_dob_str = clean_dob_str
+
+        # Reject obviously incomplete dates (e.g. just a 4-digit year like "1978")
+        if clean_dob_str.isdigit() and len(clean_dob_str) == 4:
+            logger.warning(f"Incomplete DOB provided (year only): {clean_dob_str}")
+            return (
+                False,
+                None,
+                "Incomplete date of birth provided. Please provide month, day, and year.",
+            )
+
         try:
             parsed_dob = parser.parse(clean_dob_str).date()
         except Exception:

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from app.api.config import get_settings
+from app.api.main import app
 from app.voice.conversation_logger import ConversationLogger
 from app.voice.tools import TOOLS
 
@@ -25,9 +26,10 @@ SYSTEM_PROMPT = (
     - Do NOT use filler phrases like 'Once I have this information...' or 'How else can I help you?'.
     - GREETING & INTENT FLOW: On the first turn, introduce yourself as the clinic assistant and ask what the caller needs (e.g. 'Hello! Welcome to Medical Clinic. Are you looking to book, reschedule, or cancel an appointment, or do you have a general question?').
     - Do NOT ask for patient identity on the first turn or when answering general questions (e.g. clinic hours, services). Only request identity verification when performing patient record actions (booking, cancelling, rescheduling).
-    - DOB & IDENTITY PARSING: Accept natural spoken dates in ANY format (e.g. 'August 22 1992', '22nd of August 1992', '1992 08 22'). Convert the spoken date silently into YYYY-MM-DD format and call `verify_identity` IMMEDIATELY.
-    - NO EXAMPLE FORMATS: NEVER speak example date strings (such as '1992-08-22' or 'YYYY-MM-DD format') to the caller. Do not tell the caller how to format their input.
-    - VERIFICATION FAILURE: If `verify_identity` returns verified=false, state the date/year you attempted (e.g. 'I attempted verification with date of birth August 22, 1992, but could not match our records. Could you re-confirm your name and date of birth?').
+    - DOB & IDENTITY PARSING: Accept natural spoken dates in ANY format (e.g. 'August 22 1992', '22nd of August 1992', '1992 08 22'). Convert the spoken date silently into YYYY-MM-DD format and call `verify_identity` ONLY when all three components (month, day, and year) are present.
+    - PARTIAL DATE GUARD: NEVER call `verify_identity` with a partial date (e.g. year-only or month-only like '1978' or 'December 1978'). If month, day, or year is missing, ask the caller directly for the missing detail (e.g. 'Which day in December were you born?').
+    - NO EXAMPLE FORMATS: NEVER speak example date strings (such as '1992-08-22', 'January 1, 1980', or 'YYYY-MM-DD format') to the caller. Do not tell the caller how to format their input or repeat fake example names like 'John Doe'.
+    - VERIFICATION FAILURE: If `verify_identity` returns verified=false, state politely that the identity details could not be matched with our records, and ask the caller to re-confirm their full name and full date of birth.
     - VERIFICATION SUCCESS: When `verify_identity` succeeds, proceed directly to slot availability and booking without repeating identity questions.
     
     TWO-STEP BOOKING FLOW:
@@ -98,14 +100,19 @@ def _call_ollama_api(
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req) as response:
-        if stream:
-            for line in response:
-                line_str = line.strip()
-                if line_str:
-                    yield json.loads(line_str.decode("utf-8"))
-        else:
-            return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req) as response:
+            if stream:
+                for line in response:
+                    line_str = line.strip()
+                    if line_str:
+                        yield json.loads(line_str.decode("utf-8"))
+            else:
+                return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        logger.error(f"[Ollama API HTTP {e.code}]: {body}")
+        raise RuntimeError(f"Ollama API HTTP {e.code}: {body}") from e
 
 
 def _call_openai_compatible_api(
@@ -130,24 +137,29 @@ def _call_openai_compatible_api(
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
     )
-    with urllib.request.urlopen(req) as response:
-        if stream:
-            for line in response:
-                line_str = line.decode("utf-8").strip()
-                if line_str.startswith("data: "):
-                    data_content = line_str[6:].strip()
-                    if data_content == "[DONE]":
-                        break
-                    parsed = json.loads(data_content)
-                    choices = parsed.get("choices", [])
-                    if choices:
-                        delta = choices[0].get("delta", {})
-                        yield {"message": {"content": delta.get("content", ""), "tool_calls": delta.get("tool_calls", [])}}
-        else:
-            parsed = json.loads(response.read().decode("utf-8"))
-            choices = parsed.get("choices", [])
-            msg = choices[0].get("message", {}) if choices else {}
-            return {"message": msg}
+    try:
+        with urllib.request.urlopen(req) as response:
+            if stream:
+                for line in response:
+                    line_str = line.decode("utf-8").strip()
+                    if line_str.startswith("data: "):
+                        data_content = line_str[6:].strip()
+                        if data_content == "[DONE]":
+                            break
+                        parsed = json.loads(data_content)
+                        choices = parsed.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            yield {"message": {"content": delta.get("content", ""), "tool_calls": delta.get("tool_calls", [])}}
+            else:
+                parsed = json.loads(response.read().decode("utf-8"))
+                choices = parsed.get("choices", [])
+                msg = choices[0].get("message", {}) if choices else {}
+                return {"message": msg}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        logger.error(f"[OpenAI-Compatible API HTTP {e.code}]: {body}")
+        raise RuntimeError(f"OpenAI-Compatible API HTTP {e.code}: {body}") from e
 
 
 def call_llm_api(
@@ -254,7 +266,11 @@ def run_chat_turn_stream(
 
     while True:
         try:
-            chunks = call_llm_api(messages, tools=TOOLS, stream=True)
+            res = call_ollama(messages, tools=TOOLS, stream=True)
+            if isinstance(res, dict):
+                chunks = [res]
+            else:
+                chunks = res
         except Exception as e:
             logger.error(f"[LLM Stream Error after retries]: {e}")
             yield FALLBACK_ERROR_MESSAGE

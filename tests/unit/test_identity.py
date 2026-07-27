@@ -173,3 +173,53 @@ def test_extract_sentences_from_buffer_sanitizes_punctuation():
     assert sentences == ["First sentence.", "Second sentence."]
     assert rem == ""
 
+
+def test_normalize_spoken_date():
+    """
+    Tests spoken date normalization (ordinals, number words).
+    """
+    from app.api.services.identity import _normalize_spoken_date
+
+    assert _normalize_spoken_date("August 22nd 1992") == "August 22 1992"
+    assert _normalize_spoken_date("nineteen seventy eight") == "19 70 8"
+    assert _normalize_spoken_date("December 3rd 1985") == "December 3 1985"
+
+
+def test_verify_identity_incomplete_dob_rejection(identity_test_patient):
+    """
+    Tests that incomplete year-only DOB ('1988') is rejected gracefully with explanatory message.
+    """
+    payload = {
+        "first_name": identity_test_patient.first_name,
+        "last_name": identity_test_patient.last_name,
+        "date_of_birth": "1988",
+    }
+    response = client.post("/verify-identity", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verified"] is False
+    assert data["patient_id"] is None
+    assert "Incomplete date of birth provided" in data["message"]
+
+
+def test_conversation_logger_eval_dataset(tmp_path):
+    """
+    Tests ConversationLogger writes log_eval_sample entries to eval_dataset.jsonl.
+    """
+    from app.voice.conversation_logger import ConversationLogger, LOG_DIR
+    import json
+
+    logger_inst = ConversationLogger(call_id="test_call_123")
+    logger_inst.log_tool_call(
+        tool_name="verify_identity",
+        args={"first_name": "Test", "last_name": "User", "date_of_birth": "1990-01-01"},
+        result={"verified": True, "patient_id": 1, "message": "Success"}
+    )
+
+    eval_path = LOG_DIR.parent / "eval_dataset.jsonl"
+    assert eval_path.exists()
+    content = eval_path.read_text()
+    assert "test_call_123" in content
+    assert "verify_identity" in content
+
+
