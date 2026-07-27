@@ -233,7 +233,15 @@
 
         async function initMic() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-            micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+            micStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: 16000,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                }
+            });
             const source = audioCtx.createMediaStreamSource(micStream);
 
             // 4096 samples at 16kHz ≈ 256ms per buffer

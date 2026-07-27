@@ -1,11 +1,12 @@
 import os
+import re
 import uuid
 from unittest.mock import patch
 import pytest
 from app.db.models import Appointment, AuditLog, Patient
 from app.db.session import SessionLocal
 from app.voice.conversation_logger import ConversationLogger
-from app.voice.llm_client import SYSTEM_PROMPT, execute_tool_call, run_chat_turn
+from app.voice.llm_client import SYSTEM_PROMPT, execute_tool_call, extract_sentences_from_buffer, format_tts_text, run_chat_turn
 
 
 @pytest.fixture
@@ -213,3 +214,68 @@ def test_conversation_logger_redaction_and_ist():
     assert "[DOB provided]" in content
     # Check last name redaction in tool args
     assert "'last_name': 'D.'" in content or '"last_name": "D."' in content or "D." in content
+
+
+def test_tts_sentence_joining_single_space():
+    """
+    Verifies input ["Got it!", "Dr.", "Smith on tomorrow."] produces "Got it! Dr. Smith on tomorrow.".
+    """
+    input_fragments = ["Got it!", "Dr.", "Smith on tomorrow."]
+    output = format_tts_text(input_fragments)
+    assert output == "Got it! Dr. Smith on tomorrow."
+
+
+def test_tts_regression_no_word_dot_word_runons():
+    """
+    Regression test asserting no TTS-bound string contains a word character immediately followed
+    by '.' immediately followed by another word character with no space (catches "Dr.Smith"-style bugs).
+    """
+    test_cases = [
+        ["Got it!", "Dr.", "Smith on tomorrow."],
+        ["Hello!", "Dr.", "Jones."],
+        ["Mr.", "Smith", "is here."],
+    ]
+    for case in test_cases:
+        res = format_tts_text(case)
+        assert re.search(r"\b[A-Za-z]+\.[A-Za-z]+\b", res) is None, f"Run-on artifact found in: '{res}'"
+
+
+def test_execute_scheduling_tools_reject_incomplete_datetime():
+    """
+    Verifies book_appointment, propose_booking, and reschedule_appointment tool calls with incomplete
+    or missing date/time parameters return a 'needs_clarification' status without calling underlying API.
+    """
+    # Missing time component
+    res_book = execute_tool_call(
+        "book_appointment",
+        {"doctor_id": 1, "patient_id": 1, "start_time": "November 28th"},
+    )
+    assert res_book["status"] == "needs_clarification"
+    assert "Missing time component" in res_book["error"]
+
+    # Missing date component
+    res_prop = execute_tool_call(
+        "propose_booking",
+        {"doctor_id": 1, "patient_id": 1, "start_time": "at 10 AM"},
+    )
+    assert res_prop["status"] == "needs_clarification"
+    assert "Missing date component" in res_prop["error"]
+
+    # Incomplete datetime
+    res_resched = execute_tool_call(
+        "reschedule_appointment",
+        {"appointment_id": 1, "patient_id": 1, "new_start_time": "Friday"},
+    )
+    assert res_resched["status"] == "needs_clarification"
+    assert "Missing time component" in res_resched["error"]
+
+
+def test_system_prompt_prohibits_machine_formats():
+    """
+    Verifies SYSTEM_PROMPT contains strict rules against speaking ISO 8601 strings, machine formats,
+    and unverified tool execution.
+    """
+    assert "YYYY-MM-DDTHH:MM:SSZ" in SYSTEM_PROMPT
+    assert "NEVER SPEAK MACHINE FORMATS OR EXAMPLE STRINGS" in SYSTEM_PROMPT
+    assert "NEVER CALL A TOOL WITH INCOMPLETE OR AMBIGUOUS PARAMETERS" in SYSTEM_PROMPT
+

@@ -8,6 +8,7 @@ from loguru import logger
 import uvicorn
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -30,6 +31,7 @@ from pipecat.turns.user_turn_processor import UserTurnProcessor
 
 from app.api.config import get_settings
 from app.api.main import app
+from app.voice.conversation_logger import ConversationLogger
 from app.voice.pipeline import LLMToolCallingProcessor
 
 settings = get_settings()
@@ -70,6 +72,8 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection accepted from client.")
 
+    conv_logger = ConversationLogger()
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
@@ -83,13 +87,23 @@ async def websocket_endpoint(websocket: WebSocket):
     fixtures_dir = Path(__file__).parent / "audio_test_fixtures"
     fixtures_dir.mkdir(parents=True, exist_ok=True)
 
-    vad_analyzer = SileroVADAnalyzer(sample_rate=16000)
+    vad_analyzer = SileroVADAnalyzer(
+        sample_rate=16000,
+        params=VADParams(
+            confidence=0.7,
+            start_secs=0.3,
+            stop_secs=0.2,
+            min_volume=0.6,
+        ),
+    )
     vad_processor = VADProcessor(vad_analyzer=vad_analyzer)
     user_turn_processor = UserTurnProcessor()
 
+    stt_model_name = getattr(settings, "STT_MODEL", "distil-small.en")
     stt = WhisperSTTService(
-        settings=WhisperSTTService.Settings(model="tiny.en"),
+        settings=WhisperSTTService.Settings(model=stt_model_name),
         device="cpu",
+        ttfs_p99_latency=0.5,
     )
 
     tts = PiperTTSService(
@@ -97,7 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
         download_dir=fixtures_dir,
     )
 
-    llm_processor = LLMToolCallingProcessor()
+    llm_processor = LLMToolCallingProcessor(logger_instance=conv_logger)
 
     pipeline = Pipeline(
         [

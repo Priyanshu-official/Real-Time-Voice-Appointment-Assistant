@@ -1,3 +1,4 @@
+from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,6 +7,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     OLLAMA_HOST: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:7b-instruct-q4_K_M"
+    LLM_PROVIDER: str = "ollama"  # "ollama", "groq", "openai"
+    LLM_MODEL: str = "qwen2.5:7b-instruct-q4_K_M"
+    LLM_API_KEY: Optional[str] = None
+    LLM_API_BASE: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

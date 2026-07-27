@@ -41,64 +41,7 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 
 from app.api.config import get_settings
-from app.voice.llm_client import run_chat_turn, run_chat_turn_stream
-
-settings = get_settings()
-TARGET_SAMPLE_RATE = 16000
-
-
-def load_and_resample_wav(wav_path: str) -> Tuple[bytes, int, int]:
-    """
-    Reads a WAV file, resampling to 16000 Hz 16-bit mono PCM if needed.
-    Returns (raw_pcm_bytes, sample_rate, num_channels).
-    """
-    with wave.open(wav_path, "rb") as wf:
-        n_channels = wf.getnchannels()
-        sampwidth = wf.getsampwidth()
-        framerate = wf.getframerate()
-        n_frames = wf.getnframes()
-        pcm_bytes = wf.readframes(n_frames)
-
-    if sampwidth != 2:
-        raise ValueError(f"Unsupported sample width: {sampwidth} bytes (must be 2 bytes / 16-bit PCM)")
-
-    audio_int16 = np.frombuffer(pcm_bytes, dtype=np.int16)
-
-    # Convert multi-channel to mono
-    if n_channels > 1:
-        audio_int16 = audio_int16.reshape(-1, n_channels).mean(axis=1).astype(np.int16)
-        n_channels = 1
-
-    # Resample to 16000 Hz if necessary
-    if framerate != TARGET_SAMPLE_RATE:
-        duration = len(audio_int16) / float(framerate)
-        target_len = int(round(duration * TARGET_SAMPLE_RATE))
-        orig_indices = np.linspace(0, duration, len(audio_int16), endpoint=False)
-        target_indices = np.linspace(0, duration, target_len, endpoint=False)
-        resampled_float = np.interp(target_indices, orig_indices, audio_int16.astype(np.float32))
-        audio_int16 = np.clip(resampled_float, -32768, 32767).astype(np.int16)
-        framerate = TARGET_SAMPLE_RATE
-
-    return audio_int16.tobytes(), framerate, n_channels
-
-
-def sanitize_for_tts(text: str) -> str:
-    """
-    Sanitizes LLM output text prior to TTS synthesis.
-    Strips quote characters (' and "), backticks (`), and markdown asterisks (*).
-    Collapses repeated whitespace.
-    Returns empty string if the sanitized text contains no alphanumeric characters.
-    """
-    if not text:
-        return ""
-    # Strip quotes (' and "), backticks (`), and asterisks (*)
-    sanitized = re.sub(r"['\"`*]", "", text)
-    # Collapse repeated whitespace
-    sanitized = re.sub(r"\s+", " ", sanitized).strip()
-    # If chunk contains no alphanumeric characters, drop it entirely
-    if not any(c.isalnum() for c in sanitized):
-        return ""
-    return sanitized
+from app.voice.llm_client import format_tts_text, run_chat_turn, run_chat_turn_stream, sanitize_for_tts
 
 
 class LLMToolCallingProcessor(FrameProcessor):
@@ -107,9 +50,14 @@ class LLMToolCallingProcessor(FrameProcessor):
     from `run_chat_turn_stream` (which handles tool calls against FastAPI), and emits TextFrames.
     """
 
-    def __init__(self, history: Optional[List[Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        history: Optional[List[Dict[str, Any]]] = None,
+        logger_instance: Optional[Any] = None,
+    ):
         super().__init__()
         self.history: List[Dict[str, Any]] = history if history is not None else []
+        self.logger_instance = logger_instance
         self.transcribed_text: Optional[str] = None
         self.response_text: Optional[str] = None
 
@@ -121,14 +69,14 @@ class LLMToolCallingProcessor(FrameProcessor):
                 self.transcribed_text = text
                 logger.info(f"[STT] Transcribed user audio: '{text}'")
                 await self.push_frame(LLMFullResponseStartFrame(), direction)
-                gen = run_chat_turn_stream(self.history, text)
+                gen = run_chat_turn_stream(self.history, text, logger_instance=self.logger_instance)
                 sentences = []
                 try:
                     while True:
                         sentence = next(gen)
                         if sentence:
                             sanitized = sanitize_for_tts(sentence)
-                            if sanitized:
+                            if sanitized and any(c.isalnum() for c in sanitized):
                                 sentences.append(sanitized)
                                 logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sanitized}'")
                                 await self.push_frame(TextFrame(text=sanitized), direction)
@@ -137,7 +85,7 @@ class LLMToolCallingProcessor(FrameProcessor):
                         full_response, self.history = e.value
                         self.response_text = sanitize_for_tts(full_response)
                     else:
-                        self.response_text = " ".join(sentences)
+                        self.response_text = format_tts_text(sentences)
                 await self.push_frame(LLMFullResponseEndFrame(), direction)
                 logger.info(f"[LLM] Full response completed: '{self.response_text}'")
         else:
