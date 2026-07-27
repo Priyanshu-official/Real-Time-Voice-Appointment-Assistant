@@ -1,5 +1,6 @@
 from datetime import date
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
+from dateutil import parser
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,7 +11,7 @@ def verify_patient_identity(
     db: Session,
     first_name: str,
     last_name: str,
-    date_of_birth: date,
+    date_of_birth: Union[date, str],
 ) -> Tuple[bool, Optional[int], str]:
     """
     Verifies a caller's identity against the patients table using case-insensitive match
@@ -24,12 +25,22 @@ def verify_patient_identity(
     clean_first = first_name.strip()
     clean_last = last_name.strip()
 
+    if isinstance(date_of_birth, date):
+        parsed_dob = date_of_birth
+    elif isinstance(date_of_birth, str):
+        try:
+            parsed_dob = parser.parse(date_of_birth.strip()).date()
+        except Exception:
+            parsed_dob = date_of_birth
+    else:
+        parsed_dob = date_of_birth
+
     patient = (
         db.query(Patient)
         .filter(
             func.lower(Patient.first_name) == clean_first.lower(),
             func.lower(Patient.last_name) == clean_last.lower(),
-            Patient.date_of_birth == date_of_birth,
+            Patient.date_of_birth == parsed_dob,
         )
         .first()
     )
@@ -42,7 +53,7 @@ def verify_patient_identity(
             details={
                 "first_name": clean_first,
                 "last_name": clean_last,
-                "date_of_birth": date_of_birth.isoformat(),
+                "date_of_birth": parsed_dob.isoformat() if hasattr(parsed_dob, "isoformat") else str(parsed_dob),
             },
         )
         db.add(audit)
@@ -56,7 +67,7 @@ def verify_patient_identity(
             details={
                 "first_name": clean_first,
                 "last_name": clean_last,
-                "date_of_birth": date_of_birth.isoformat(),
+                "date_of_birth": parsed_dob.isoformat() if hasattr(parsed_dob, "isoformat") else str(parsed_dob),
             },
         )
         db.add(audit)
