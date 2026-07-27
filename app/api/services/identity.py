@@ -8,6 +8,17 @@ from sqlalchemy.orm import Session
 from app.db.models import AuditLog, Patient
 
 
+import re
+
+def _normalize_string(val: str) -> str:
+    if not isinstance(val, str):
+        return ""
+    # Strip leading and trailing whitespace, quotes, and punctuation
+    cleaned = re.sub(r"^['\"`\s.,!?:;]+|['\"`\s.,!?:;]+$", "", val)
+    # Collapse internal whitespace
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def verify_patient_identity(
     db: Session,
     first_name: str,
@@ -17,22 +28,22 @@ def verify_patient_identity(
     """
     Verifies a caller's identity against the patients table using case-insensitive match
     on first_name, last_name, and date_of_birth, after stripping leading/trailing whitespace
-    and trailing punctuation.
+    and punctuation/quotes.
 
     Writes an audit log entry for every verification attempt (allowed=True on match, allowed=False on mismatch).
 
     Returns:
         (verified: bool, patient_id: Optional[int], message: str)
     """
-    clean_first = first_name.strip().rstrip(".,!?").strip() if isinstance(first_name, str) else ""
-    clean_last = last_name.strip().rstrip(".,!?").strip() if isinstance(last_name, str) else ""
+    clean_first = _normalize_string(first_name)
+    clean_last = _normalize_string(last_name)
 
     parsed_dob = None
     if isinstance(date_of_birth, date):
         parsed_dob = date_of_birth
         raw_dob_str = date_of_birth.isoformat()
     elif isinstance(date_of_birth, str):
-        clean_dob_str = date_of_birth.strip().rstrip(".,!?").strip()
+        clean_dob_str = _normalize_string(date_of_birth)
         raw_dob_str = clean_dob_str
         try:
             parsed_dob = parser.parse(clean_dob_str).date()

@@ -1,39 +1,46 @@
 import json
 import re
+import time
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from app.api.config import get_settings
-from app.api.main import app
 from app.voice.conversation_logger import ConversationLogger
 from app.voice.tools import TOOLS
 
 settings = get_settings()
 client = TestClient(app)
 
+FALLBACK_ERROR_MESSAGE = "Something went wrong. Please call us again after an hour."
+
 SYSTEM_PROMPT = (
     '''
     You are a helpful voice appointment assistant for a medical clinic.
-    Speak naturally, concisely, and directly — keep responses to one short sentence per turn whenever possible. do not Speak special cheracters
-    IMPORTANT FOLLOW BELOW STEPS AND INSTRUCTIONS
-    Do NOT use filler phrases like 'Once I have this information, we can proceed' or 'How else can I help you today?'.\n\n
-    GREETING & INTENT FLOW: On the first turn, introduce yourself as the clinic assistant and ask what the caller needs (e.g. 'Hello! Welcome to Medical Clinic. Are you looking to book, reschedule, or cancel an appointment, or do you have a general question?').\n
-    Do NOT ask for patient identity (name or DOB) on the first turn or when answering general questions (e.g. clinic hours, services). 
-    Only request identity verification when the caller asks for an action requiring patient records (cancelling, rescheduling, checking existing appointments).\n\n
-    DOB PARSING INSTRUCTION: Accept natural spoken dates (e.g. '16th February 2000', 'Feb 16 2005') and convert them to YYYY-MM-DD format`.\n\n
-    TWO-STEP BOOKING FLOW:\n
-    1. When a patient requests an appointment, first call `propose_booking` to check slot availability and working hours.\n
-    2. Read the returned proposal summary back to the caller and explicitly wait for their confirmation ('yes' or 'confirm').\n
-    3. ONLY call `confirm_booking` with the `confirmation_token` AFTER the caller explicitly confirms ('yes'). If the caller says 'no' or asks to change something, do NOT call `confirm_booking` — offer to propose a different time instead.\n\n
+    Speak naturally, concisely, and directly — keep responses to one short sentence per turn whenever possible. Do not speak special characters or format instructions.
+    
+    IMPORTANT INSTRUCTIONS & CONSTRAINTS:
+    - Do NOT use filler phrases like 'Once I have this information...' or 'How else can I help you?'.
+    - GREETING & INTENT FLOW: On the first turn, introduce yourself as the clinic assistant and ask what the caller needs (e.g. 'Hello! Welcome to Medical Clinic. Are you looking to book, reschedule, or cancel an appointment, or do you have a general question?').
+    - Do NOT ask for patient identity on the first turn or when answering general questions (e.g. clinic hours, services). Only request identity verification when performing patient record actions (booking, cancelling, rescheduling).
+    - DOB & IDENTITY PARSING: Accept natural spoken dates in ANY format (e.g. 'August 22 1992', '22nd of August 1992', '1992 08 22'). Convert the spoken date silently into YYYY-MM-DD format and call `verify_identity` IMMEDIATELY.
+    - NO EXAMPLE FORMATS: NEVER speak example date strings (such as '1992-08-22' or 'YYYY-MM-DD format') to the caller. Do not tell the caller how to format their input.
+    - VERIFICATION FAILURE: If `verify_identity` returns verified=false, state the date/year you attempted (e.g. 'I attempted verification with date of birth August 22, 1992, but could not match our records. Could you re-confirm your name and date of birth?').
+    - VERIFICATION SUCCESS: When `verify_identity` succeeds, proceed directly to slot availability and booking without repeating identity questions.
+    
+    TWO-STEP BOOKING FLOW:
+    1. When a patient requests an appointment, first call `propose_booking` to check slot availability and working hours.
+    2. Read the returned proposal summary back to the caller and explicitly wait for their confirmation ('yes' or 'confirm').
+    3. ONLY call `confirm_booking` with the `confirmation_token` AFTER the caller explicitly confirms ('yes'). If the caller says 'no' or asks to change something, do NOT call `confirm_booking` — offer to propose a different time instead.
     
     **Available tools**
-    * `verify_identity`: Verify patient identity using first_name, last_name, date_of_birth (YYYY-MM-DD).\n"
-    * `check_availability`: Retrieve open 30-minute appointment slots for a doctor on a date (YYYY-MM-DD).\n"
-    * `propose_booking`: Validate appointment slot and get a confirmation token without writing to the database.\n"
-    * `confirm_booking`: Finalize and write appointment to the database using the confirmation_token.\n"
-    * `cancel_appointment`: Cancel an appointment for a verified patient.\n"
+    * `verify_identity`: Verify patient identity using first_name, last_name, date_of_birth (YYYY-MM-DD).
+    * `check_availability`: Retrieve open 30-minute appointment slots for a doctor on a date (YYYY-MM-DD).
+    * `propose_booking`: Validate appointment slot and get a confirmation token without writing to the database.
+    * `confirm_booking`: Finalize and write appointment to the database using the confirmation_token.
+    * `cancel_appointment`: Cancel an appointment for a verified patient.
     * `reschedule_appointment`: Reschedule an appointment for a verified patient.
     '''
 )
@@ -73,17 +80,13 @@ def execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Unknown tool: {name}"}
 
 
-def call_ollama(
+def _call_ollama_api(
     messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None, stream: bool = True
 ) -> Any:
-    """
-    Sends a chat completion request to the local Ollama instance.
-    If stream=True, yields parsed JSON response objects line-by-line.
-    If stream=False, returns the complete parsed JSON response object.
-    """
+    model_name = getattr(settings, "LLM_MODEL", None) or getattr(settings, "OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
     url = f"{settings.OLLAMA_HOST.rstrip('/')}/api/chat"
     payload = {
-        "model": settings.OLLAMA_MODEL,
+        "model": model_name,
         "messages": messages,
         "stream": stream,
     }
@@ -105,11 +108,114 @@ def call_ollama(
             return json.loads(response.read().decode("utf-8"))
 
 
+def _call_openai_compatible_api(
+    messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None, stream: bool = True
+) -> Any:
+    api_base = settings.LLM_API_BASE or "https://api.groq.com/openai/v1"
+    url = f"{api_base.rstrip('/')}/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if settings.LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.LLM_API_KEY}"
+
+    payload = {
+        "model": getattr(settings, "LLM_MODEL", "qwen-2.5-7b-instruct"),
+        "messages": messages,
+        "stream": stream,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+    )
+    with urllib.request.urlopen(req) as response:
+        if stream:
+            for line in response:
+                line_str = line.decode("utf-8").strip()
+                if line_str.startswith("data: "):
+                    data_content = line_str[6:].strip()
+                    if data_content == "[DONE]":
+                        break
+                    parsed = json.loads(data_content)
+                    choices = parsed.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        yield {"message": {"content": delta.get("content", ""), "tool_calls": delta.get("tool_calls", [])}}
+        else:
+            parsed = json.loads(response.read().decode("utf-8"))
+            choices = parsed.get("choices", [])
+            msg = choices[0].get("message", {}) if choices else {}
+            return {"message": msg}
+
+
+def call_llm_api(
+    messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None, stream: bool = True
+) -> Any:
+    """
+    Sends a chat completion request to the configured LLM provider (Ollama or Groq/OpenAI).
+    Implements a 3-retry attempt loop on network/server errors.
+    """
+    max_retries = 3
+    last_exception = None
+    provider = getattr(settings, "LLM_PROVIDER", "ollama").lower()
+    for attempt in range(1, max_retries + 1):
+        try:
+            if provider in ("groq", "openai"):
+                res_gen = _call_openai_compatible_api(messages, tools=tools, stream=stream)
+                return list(res_gen) if stream else res_gen
+            else:
+                res_gen = _call_ollama_api(messages, tools=tools, stream=stream)
+                return list(res_gen) if stream else res_gen
+        except Exception as e:
+            last_exception = e
+            logger.warning(f"[LLM API Attempt {attempt}/{max_retries} Failed]: {e}")
+            if attempt < max_retries:
+                time.sleep(0.5 * attempt)
+
+    raise RuntimeError(f"LLM API request failed after {max_retries} attempts: {last_exception}")
+
+
+call_ollama = call_llm_api
+
+
+def sanitize_for_tts(text: str) -> str:
+    """
+    Sanitizes LLM output text prior to TTS synthesis.
+    Strips <think>...</think> reasoning blocks, quotes (' and "), backticks (`), and markdown asterisks (*).
+    Collapses repeated whitespace.
+    Returns empty string if the sanitized text contains no alphanumeric characters.
+    """
+    if not text:
+        return ""
+    # Strip complete <think>...</think> reasoning blocks
+    sanitized = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Strip standalone or unclosed <think> or </think> tags
+    sanitized = re.sub(r"</?think>", "", sanitized, flags=re.IGNORECASE)
+    # Strip quotes (' and "), backticks (`), and asterisks (*)
+    sanitized = re.sub(r"['\"`*]", "", sanitized)
+    # Collapse repeated whitespace
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    # If chunk contains no alphanumeric characters, drop it entirely
+    if not any(c.isalnum() for c in sanitized):
+        return ""
+    return sanitized
+
+
 def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
     """
     Extracts complete sentences ending with '.', '!', '?', or newline from buffer.
     Returns (list_of_completed_sentences, remaining_buffer).
+    Sanitizes each sentence, strips <think> reasoning blocks, and drops punctuation-only fragments.
     """
+    # Remove complete <think>...</think> blocks from buffer
+    buffer = re.sub(r"<think>.*?</think>", "", buffer, flags=re.DOTALL)
+
+    # If buffer is currently inside an unclosed <think> block, wait for closing tag
+    if "<think>" in buffer.lower() and "</think>" not in buffer.lower():
+        return [], buffer
+
     matches = list(re.finditer(r".*?[.!?\n]+(?:\s+|$)", buffer, flags=re.DOTALL))
     if not matches:
         return [], buffer
@@ -119,7 +225,9 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
     for match in matches:
         s = match.group(0).strip()
         if s:
-            sentences.append(s)
+            sanitized = sanitize_for_tts(s)
+            if sanitized:
+                sentences.append(sanitized)
         last_end = match.end()
 
     remaining = buffer[last_end:]
@@ -145,11 +253,12 @@ def run_chat_turn_stream(
         logger_instance.log_stt(user_message)
 
     while True:
-        res = call_ollama(messages, tools=TOOLS, stream=True)
-        if isinstance(res, dict):
-            chunks = [res]
-        else:
-            chunks = res
+        try:
+            chunks = call_llm_api(messages, tools=TOOLS, stream=True)
+        except Exception as e:
+            logger.error(f"[LLM Stream Error after retries]: {e}")
+            yield FALLBACK_ERROR_MESSAGE
+            return FALLBACK_ERROR_MESSAGE, history
 
         full_content = ""
         tool_calls_acc: List[Dict[str, Any]] = []
@@ -170,18 +279,21 @@ def run_chat_turn_stream(
                 tool_calls_acc.extend(delta_tool_calls)
 
         if buffer.strip() and not tool_calls_acc:
-            yield buffer.strip()
+            sanitized_buf = sanitize_for_tts(buffer.strip())
+            if sanitized_buf:
+                yield sanitized_buf
             buffer = ""
 
         assistant_msg: Dict[str, Any] = {"role": "assistant"}
-        if full_content:
-            assistant_msg["content"] = full_content
+        clean_full_content = sanitize_for_tts(full_content)
+        if clean_full_content:
+            assistant_msg["content"] = clean_full_content
         if tool_calls_acc:
             assistant_msg["tool_calls"] = tool_calls_acc
         messages.append(assistant_msg)
 
         if full_content and logger_instance:
-            logger_instance.log_llm_response(full_content)
+            logger_instance.log_llm_response(clean_full_content)
 
         if tool_calls_acc:
             for tool_call in tool_calls_acc:
@@ -191,8 +303,19 @@ def run_chat_turn_stream(
                 if isinstance(tool_args, str):
                     tool_args = json.loads(tool_args)
 
-                # Tool call -> await result -> append result to messages history -> THEN start next LLM generation
-                result = execute_tool_call(tool_name, tool_args)
+                # Retry tool call up to 3 times
+                result = None
+                for attempt in range(1, 4):
+                    try:
+                        result = execute_tool_call(tool_name, tool_args)
+                        break
+                    except Exception as te:
+                        logger.warning(f"[Tool Call '{tool_name}' Attempt {attempt}/3 Failed]: {te}")
+                        if attempt == 3:
+                            result = {"error": "Internal service error after retries."}
+                        else:
+                            time.sleep(0.5 * attempt)
+
                 if logger_instance:
                     logger_instance.log_tool_call(tool_name, tool_args, result)
                 messages.append(
@@ -204,7 +327,7 @@ def run_chat_turn_stream(
                 )
             continue
         else:
-            return full_content, messages
+            return clean_full_content, messages
 
 
 def run_chat_turn(

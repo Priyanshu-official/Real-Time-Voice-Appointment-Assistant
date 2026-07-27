@@ -140,3 +140,36 @@ def test_sanitize_for_tts():
     assert sanitize_for_tts("**Dr. Smith** is ready.") == "Dr. Smith is ready."
     assert sanitize_for_tts("  Hello   world!  ") == "Hello world!"
     assert sanitize_for_tts('"Yes, confirmed."') == "Yes, confirmed."
+
+
+def test_verify_identity_messy_stt_formatting(identity_test_patient):
+    """
+    Test: STT input with quotes, extra spaces, and trailing periods
+    verifies successfully.
+    """
+    payload = {
+        "first_name": " 'IdentityTestFirst.' ",
+        "last_name": "\"IDENTITYTESTLAST,\"",
+        "date_of_birth": " '1988-04-12.' ",
+    }
+    response = client.post("/verify-identity", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verified"] is True
+    assert data["patient_id"] == identity_test_patient.id
+
+
+def test_extract_sentences_from_buffer_sanitizes_punctuation():
+    """
+    Test: extract_sentences_from_buffer filters out lone punctuation sentences.
+    """
+    from app.voice.llm_client import extract_sentences_from_buffer
+
+    sentences, rem = extract_sentences_from_buffer("Thank you. . ")
+    assert sentences == ["Thank you."]
+    assert rem == ""
+
+    sentences, rem = extract_sentences_from_buffer("First sentence. ' Second sentence.")
+    assert sentences == ["First sentence.", "Second sentence."]
+    assert rem == ""
+
