@@ -53,11 +53,11 @@ CHECK_AVAILABILITY_TOOL: Dict[str, Any] = {
     },
 }
 
-BOOK_APPOINTMENT_TOOL: Dict[str, Any] = {
+PROPOSE_BOOKING_TOOL: Dict[str, Any] = {
     "type": "function",
     "function": {
-        "name": "book_appointment",
-        "description": "Books an appointment slot for a verified patient with a doctor.",
+        "name": "propose_booking",
+        "description": "Validates appointment slot availability and doctor working hours without writing to database. Returns a human-readable summary and confirmation token.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -83,6 +83,24 @@ BOOK_APPOINTMENT_TOOL: Dict[str, Any] = {
                 },
             },
             "required": ["patient_id", "doctor_id", "start_time", "end_time"],
+        },
+    },
+}
+
+CONFIRM_BOOKING_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "confirm_booking",
+        "description": "Finalizes and writes an appointment to the database using a valid confirmation token received from propose_booking.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "confirmation_token": {
+                    "type": "string",
+                    "description": "Short-lived confirmation token returned by propose_booking",
+                },
+            },
+            "required": ["confirmation_token"],
         },
     },
 }
@@ -150,7 +168,8 @@ RESCHEDULE_APPOINTMENT_TOOL: Dict[str, Any] = {
 TOOLS: List[Dict[str, Any]] = [
     VERIFY_IDENTITY_TOOL,
     CHECK_AVAILABILITY_TOOL,
-    BOOK_APPOINTMENT_TOOL,
+    PROPOSE_BOOKING_TOOL,
+    CONFIRM_BOOKING_TOOL,
     CANCEL_APPOINTMENT_TOOL,
     RESCHEDULE_APPOINTMENT_TOOL,
 ]
@@ -159,3 +178,4 @@ TOOLS: List[Dict[str, Any]] = [
 def get_tool_definitions() -> List[Dict[str, Any]]:
     """Returns all LLM function calling tool definitions."""
     return TOOLS
+

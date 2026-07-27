@@ -1,11 +1,13 @@
 import json
 import re
 import urllib.request
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi.testclient import TestClient
+
 from app.api.config import get_settings
 from app.api.main import app
+from app.voice.conversation_logger import ConversationLogger
 from app.voice.tools import TOOLS
 
 settings = get_settings()
@@ -15,18 +17,21 @@ SYSTEM_PROMPT = (
     "You are a helpful voice appointment assistant for a medical clinic. "
     "Speak naturally, concisely, and directly — keep responses to one short sentence per turn whenever possible. "
     "Do NOT use filler phrases like 'Once I have this information, we can proceed' or 'How else can I help you today?'.\n\n"
-    "CRITICAL SAFETY & PRIVACY RULE: You MUST verify the patient's identity "
-    "(using the `verify_identity` tool with first_name, last_name, and date_of_birth) "
-    "BEFORE returning any patient-specific data or performing any booking, cancellation, "
-    "or rescheduling actions.\n\n"
-    "DOB PARSING INSTRUCTION: Accept natural spoken dates (e.g. '16th February 2000', 'Feb 16 2005') "
-    "and convert them to YYYY-MM-DD format before calling `verify_identity`.\n\n"
+    "GREETING & INTENT FLOW: On the first turn, introduce yourself as the clinic assistant and ask what the caller needs (e.g. 'Hello! Welcome to Medical Clinic. Are you looking to book, reschedule, or cancel an appointment, or do you have a general question?').\n"
+    "Do NOT ask for patient identity (name or DOB) on the first turn or when answering general questions (e.g. clinic hours, services). Only request identity verification when the caller asks for an action requiring patient records (booking, cancelling, rescheduling, checking existing appointments).\n\n"
+    "CRITICAL SAFETY & PRIVACY RULE: You MUST verify patient identity using `verify_identity` (first_name, last_name, date_of_birth) BEFORE returning patient-specific data or executing booking/cancellation/rescheduling.\n"
+    "DOB PARSING INSTRUCTION: Accept natural spoken dates (e.g. '16th February 2000', 'Feb 16 2005') and convert them to YYYY-MM-DD format before calling `verify_identity`.\n\n"
+    "TWO-STEP BOOKING FLOW:\n"
+    "1. When a patient requests an appointment, first call `propose_booking` to check slot availability and working hours.\n"
+    "2. Read the returned proposal summary back to the caller and explicitly wait for their confirmation ('yes' or 'confirm').\n"
+    "3. ONLY call `confirm_booking` with the `confirmation_token` AFTER the caller explicitly confirms ('yes'). If the caller says 'no' or asks to change something, do NOT call `confirm_booking` — offer to propose a different time instead.\n\n"
     "Available tools:\n"
     "1. `verify_identity`: Verify patient identity using first_name, last_name, date_of_birth (YYYY-MM-DD).\n"
     "2. `check_availability`: Retrieve open 30-minute appointment slots for a doctor on a date (YYYY-MM-DD).\n"
-    "3. `book_appointment`: Book an appointment slot for a verified patient.\n"
-    "4. `cancel_appointment`: Cancel an appointment for a verified patient.\n"
-    "5. `reschedule_appointment`: Reschedule an appointment for a verified patient."
+    "3. `propose_booking`: Validate appointment slot and get a confirmation token without writing to the database.\n"
+    "4. `confirm_booking`: Finalize and write appointment to the database using the confirmation_token.\n"
+    "5. `cancel_appointment`: Cancel an appointment for a verified patient.\n"
+    "6. `reschedule_appointment`: Reschedule an appointment for a verified patient."
 )
 
 
@@ -41,6 +46,12 @@ def execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         doctor_id = args.get("doctor_id")
         date_str = args.get("date")
         res = client.get(f"/doctors/{doctor_id}/availability?date={date_str}")
+        return res.json()
+    elif name == "propose_booking":
+        res = client.post("/appointments/propose", json=args)
+        return res.json()
+    elif name == "confirm_booking":
+        res = client.post("/appointments/confirm", json=args)
         return res.json()
     elif name == "book_appointment":
         res = client.post("/appointments", json=args)
@@ -58,7 +69,9 @@ def execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Unknown tool: {name}"}
 
 
-def call_ollama(messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None, stream: bool = True) -> Any:
+def call_ollama(
+    messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None, stream: bool = True
+) -> Any:
     """
     Sends a chat completion request to the local Ollama instance.
     If stream=True, yields parsed JSON response objects line-by-line.
@@ -110,11 +123,13 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
 
 
 def run_chat_turn_stream(
-    history: List[Dict[str, Any]], user_message: str
+    history: List[Dict[str, Any]],
+    user_message: str,
+    logger_instance: Optional[ConversationLogger] = None,
 ):
     """
     Generator yielding completed text sentences as they arrive in the stream.
-    Handles tool calls transparently.
+    Handles tool calls transparently with strict sequential context ordering.
     Returns (final_response_text, updated_history) via generator return.
     """
     messages = list(history)
@@ -122,6 +137,8 @@ def run_chat_turn_stream(
         messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
     messages.append({"role": "user", "content": user_message})
+    if logger_instance:
+        logger_instance.log_stt(user_message)
 
     while True:
         res = call_ollama(messages, tools=TOOLS, stream=True)
@@ -159,6 +176,9 @@ def run_chat_turn_stream(
             assistant_msg["tool_calls"] = tool_calls_acc
         messages.append(assistant_msg)
 
+        if full_content and logger_instance:
+            logger_instance.log_llm_response(full_content)
+
         if tool_calls_acc:
             for tool_call in tool_calls_acc:
                 fn = tool_call.get("function", {})
@@ -167,7 +187,10 @@ def run_chat_turn_stream(
                 if isinstance(tool_args, str):
                     tool_args = json.loads(tool_args)
 
+                # Tool call -> await result -> append result to messages history -> THEN start next LLM generation
                 result = execute_tool_call(tool_name, tool_args)
+                if logger_instance:
+                    logger_instance.log_tool_call(tool_name, tool_args, result)
                 messages.append(
                     {
                         "role": "tool",
@@ -181,13 +204,15 @@ def run_chat_turn_stream(
 
 
 def run_chat_turn(
-    history: List[Dict[str, Any]], user_message: str
+    history: List[Dict[str, Any]],
+    user_message: str,
+    logger_instance: Optional[ConversationLogger] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Runs a single turn of conversation with tool calling execution.
     Returns (assistant_response_text, updated_history).
     """
-    gen = run_chat_turn_stream(history, user_message)
+    gen = run_chat_turn_stream(history, user_message, logger_instance=logger_instance)
     sentences = []
     try:
         while True:
@@ -198,4 +223,3 @@ def run_chat_turn(
             return final_text, updated_history
         else:
             return " ".join(sentences), history
-
