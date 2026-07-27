@@ -1,0 +1,16 @@
+{
+  "num_concurrent_calls": 15,
+  "total_requests": 45,
+  "total_duration_ms": 161.05,
+  "success_rate_pct": 100.0,
+  "verified_calls": 15,
+  "successful_bookings": 2,
+  "expected_collisions": 13,
+  "unexpected_errors": 0,
+  "latency_stats_ms": {
+    "min": 19.84,
+    "median": 50.72,
+    "p95": 67.71,
+    "max": 69.89
+  }
+}
