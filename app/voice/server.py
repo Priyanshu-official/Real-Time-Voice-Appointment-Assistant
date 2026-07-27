@@ -8,6 +8,7 @@ from loguru import logger
 import uvicorn
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -88,7 +89,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     vad_analyzer = SileroVADAnalyzer(
         sample_rate=16000,
-        params=SileroVADAnalyzer.VADParams(
+        params=VADParams(
             confidence=0.7,
             start_secs=0.3,
             stop_secs=0.4,
