@@ -3,12 +3,13 @@ from app.voice.tools import TOOLS, get_tool_definitions
 
 def test_tool_count_and_names():
     definitions = get_tool_definitions()
-    assert len(definitions) == 5
+    assert len(definitions) == 6
     tool_names = [t["function"]["name"] for t in definitions]
     expected_names = [
         "verify_identity",
         "check_availability",
-        "book_appointment",
+        "propose_booking",
+        "confirm_booking",
         "cancel_appointment",
         "reschedule_appointment",
     ]
@@ -26,15 +27,19 @@ def test_tool_parameters_match_endpoints():
     ca = tool_map["check_availability"]
     assert set(ca["parameters"]["required"]) == {"doctor_id", "date"}
 
-    # 3. book_appointment
-    ba = tool_map["book_appointment"]
-    assert set(ba["parameters"]["required"]) == {"patient_id", "doctor_id", "start_time", "end_time"}
+    # 3. propose_booking
+    pb = tool_map["propose_booking"]
+    assert set(pb["parameters"]["required"]) == {"patient_id", "doctor_id", "start_time", "end_time"}
 
-    # 4. cancel_appointment
+    # 4. confirm_booking
+    cb = tool_map["confirm_booking"]
+    assert set(cb["parameters"]["required"]) == {"confirmation_token"}
+
+    # 5. cancel_appointment
     canc = tool_map["cancel_appointment"]
     assert set(canc["parameters"]["required"]) == {"appointment_id", "patient_id"}
 
-    # 5. reschedule_appointment
+    # 6. reschedule_appointment
     resch = tool_map["reschedule_appointment"]
     assert set(resch["parameters"]["required"]) == {"appointment_id", "patient_id", "doctor_id", "start_time", "end_time"}
 

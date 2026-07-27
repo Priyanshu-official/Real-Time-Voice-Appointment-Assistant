@@ -34,3 +34,7 @@ pgdata/
 
 # ── uv ──
 .python-version
+
+# ── Runtime Logs ──
+logs/
+

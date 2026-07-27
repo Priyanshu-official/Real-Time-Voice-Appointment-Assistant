@@ -180,7 +180,7 @@ class AudioSinkWriter(FrameProcessor):
 async def run_voice_pipeline(
     input_wav_path: str,
     output_wav_path: str,
-    stt_model: str = "tiny.en",
+    stt_model: str = "distil-small.en",
     piper_voice: str = "en_US-lessac-medium",
 ) -> Dict[str, Any]:
     """

@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 from app.api.main import app
+from app.api.routes.appointments import CONFIRMATION_TOKENS
 from app.db.models import Appointment, AuditLog, Patient
 from app.db.session import SessionLocal
 
@@ -68,6 +70,70 @@ def test_booking_unverified_patient_fails(test_doctor):
     assert "verified" in response.json()["detail"].lower()
 
 
+def test_propose_and_confirm_booking_success(verified_booking_setup):
+    """
+    Tests the two-step propose -> confirm flow.
+    """
+    doctor_id = verified_booking_setup["doctor_id"]
+    patient_id = verified_booking_setup["patient_id"]
+
+    propose_payload = {
+        "patient_id": patient_id,
+        "doctor_id": doctor_id,
+        "start_time": "2026-08-03T10:00:00Z",
+        "end_time": "2026-08-03T10:30:00Z",
+        "reason": "Consultation",
+    }
+    res_prop = client.post("/appointments/propose", json=propose_payload)
+    assert res_prop.status_code == 200
+    prop_data = res_prop.json()
+    assert prop_data["status"] == "proposed"
+    assert "confirmation_token" in prop_data
+    token = prop_data["confirmation_token"]
+
+    confirm_payload = {"confirmation_token": token}
+    res_conf = client.post("/appointments/confirm", json=confirm_payload)
+    assert res_conf.status_code == 200
+    conf_data = res_conf.json()
+    assert conf_data["doctor_id"] == doctor_id
+    assert conf_data["patient_id"] == patient_id
+    assert conf_data["status"] == "booked"
+
+
+def test_confirm_booking_expired_token(verified_booking_setup):
+    """
+    Verifies that an expired confirmation token is rejected with HTTP 400.
+    """
+    doctor_id = verified_booking_setup["doctor_id"]
+    patient_id = verified_booking_setup["patient_id"]
+
+    propose_payload = {
+        "patient_id": patient_id,
+        "doctor_id": doctor_id,
+        "start_time": "2026-08-03T11:00:00Z",
+        "end_time": "2026-08-03T11:30:00Z",
+    }
+    res_prop = client.post("/appointments/propose", json=propose_payload)
+    assert res_prop.status_code == 200
+    token = res_prop.json()["confirmation_token"]
+
+    # Manually expire the token
+    CONFIRMATION_TOKENS[token]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    res_conf = client.post("/appointments/confirm", json={"confirmation_token": token})
+    assert res_conf.status_code == 400
+    assert "expired" in res_conf.json()["detail"].lower()
+
+
+def test_confirm_booking_invalid_or_reused_token(verified_booking_setup):
+    """
+    Verifies that using an invalid or already used confirmation token fails with HTTP 400.
+    """
+    res_conf = client.post("/appointments/confirm", json={"confirmation_token": "non_existent_token"})
+    assert res_conf.status_code == 400
+    assert "missing" in res_conf.json()["detail"].lower() or "expired" in res_conf.json()["detail"].lower()
+
+
 def test_booking_success(verified_booking_setup):
     """
     Verifies that booking a valid slot for a verified patient succeeds (200 OK),
@@ -79,8 +145,8 @@ def test_booking_success(verified_booking_setup):
     payload = {
         "patient_id": patient_id,
         "doctor_id": doctor_id,
-        "start_time": "2026-08-03T10:00:00Z",
-        "end_time": "2026-08-03T10:30:00Z",
+        "start_time": "2026-08-03T12:00:00Z",
+        "end_time": "2026-08-03T12:30:00Z",
         "reason": "Routine Checkup",
     }
     response = client.post("/appointments", json=payload)
@@ -102,8 +168,8 @@ def test_booking_double_booking_returns_409(verified_booking_setup):
     payload = {
         "patient_id": patient_id,
         "doctor_id": doctor_id,
-        "start_time": "2026-08-03T11:00:00Z",
-        "end_time": "2026-08-03T11:30:00Z",
+        "start_time": "2026-08-03T13:00:00Z",
+        "end_time": "2026-08-03T13:30:00Z",
     }
     res1 = client.post("/appointments", json=payload)
     assert res1.status_code == 200
