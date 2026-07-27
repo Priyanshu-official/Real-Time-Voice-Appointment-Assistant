@@ -24,6 +24,7 @@ During live voice testing, several interaction bugs were identified:
 | `ISSUE-007` | **Major** | Verified session state loss causing LLM to re-ask for patient identity | `FIX-LOG-007` | Add strict persistence rule in `SYSTEM_PROMPT`: once `verify_identity` returns `verified=true`, identity is locked as verified for the rest of the session. |
 | `ISSUE-008` | **Minor** | TTS speaking lone punctuation fragments (`"."`, `"!"`, `"'"`)| `FIX-LOG-008` | Require `any(c.isalnum() for c in text)` check in `LLMToolCallingProcessor` before pushing `TextFrame` objects down to `PiperTTSService`. |
 | `ISSUE-009` | **Minor** | Short affirmations (*"Yeah"*, *"Hi"*) on first turn triggering full greeting | `FIX-LOG-009` | Add `CONTEXTUAL AFFIRMATIONS` rule in `SYSTEM_PROMPT` distinguishing initial turn greetings from mid-turn affirmative answers. |
+| `ISSUE-010` | **Minor** | TTS mispronouncing contractions (*"whats"*, *"Im"*) and shouting 1-word exclamations (*"Great!"*) | `FIX-LOG-010` | Update `sanitize_for_tts` to preserve contraction apostrophes (*"what's"*, *"It's"*) while stripping outer quotes, and merge short 1-word exclamations into the following sentence in `extract_sentences_from_buffer`. |
 
 ## Decision
 

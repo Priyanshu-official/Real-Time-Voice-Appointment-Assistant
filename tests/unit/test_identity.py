@@ -130,7 +130,8 @@ def test_verify_identity_unparseable_dob_does_not_crash(identity_test_patient):
 def test_sanitize_for_tts():
     """
     Tests TTS text sanitization rules:
-    - Strip quote characters (' and "), backticks, and markdown asterisks (*).
+    - Preserve single quotes in contractions (what's, It's, I'm).
+    - Strip double quote characters ("), backticks, outer single quotes, and markdown asterisks (*).
     - Collapse repeated whitespace.
     - Drop chunks containing no alphanumeric characters.
     """
@@ -140,6 +141,8 @@ def test_sanitize_for_tts():
     assert sanitize_for_tts("**Dr. Smith** is ready.") == "Dr. Smith is ready."
     assert sanitize_for_tts("  Hello   world!  ") == "Hello world!"
     assert sanitize_for_tts('"Yes, confirmed."') == "Yes, confirmed."
+    assert sanitize_for_tts("What's your name?") == "What's your name?"
+    assert sanitize_for_tts("It's ready.") == "It's ready."
 
 
 def test_verify_identity_messy_stt_formatting(identity_test_patient):
@@ -161,7 +164,7 @@ def test_verify_identity_messy_stt_formatting(identity_test_patient):
 
 def test_extract_sentences_from_buffer_sanitizes_punctuation():
     """
-    Test: extract_sentences_from_buffer filters out lone punctuation sentences.
+    Test: extract_sentences_from_buffer filters out lone punctuation sentences and merges short 1-word exclamations.
     """
     from app.voice.llm_client import extract_sentences_from_buffer
 
@@ -169,8 +172,8 @@ def test_extract_sentences_from_buffer_sanitizes_punctuation():
     assert sentences == ["Thank you."]
     assert rem == ""
 
-    sentences, rem = extract_sentences_from_buffer("First sentence. ' Second sentence.")
-    assert sentences == ["First sentence.", "Second sentence."]
+    sentences, rem = extract_sentences_from_buffer("Great! Now let's check available slots.")
+    assert sentences == ["Great, now let's check available slots."]
     assert rem == ""
 
 

@@ -196,7 +196,9 @@ call_ollama = call_llm_api
 def sanitize_for_tts(text: str) -> str:
     """
     Sanitizes LLM output text prior to TTS synthesis.
-    Strips <think>...</think> reasoning blocks, quotes (' and "), backticks (`), and markdown asterisks (*).
+    Strips <think>...</think> reasoning blocks, double quotes ("), backticks (`), and markdown asterisks (*).
+    Preserves single quotes (') inside words for contractions (e.g. what's, I'm, it's).
+    Strips standalone or outer single quotes.
     Collapses repeated whitespace.
     Returns empty string if the sanitized text contains no alphanumeric characters.
     """
@@ -206,8 +208,10 @@ def sanitize_for_tts(text: str) -> str:
     sanitized = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     # Strip standalone or unclosed <think> or </think> tags
     sanitized = re.sub(r"</?think>", "", sanitized, flags=re.IGNORECASE)
-    # Strip quotes (' and "), backticks (`), and asterisks (*)
-    sanitized = re.sub(r"['\"`*]", "", sanitized)
+    # Strip double quotes ("), backticks (`), and asterisks (*)
+    sanitized = re.sub(r"[\"`*]", "", sanitized)
+    # Strip standalone or outer single quotes not part of a contraction word
+    sanitized = re.sub(r"(?<!\w)'|'(?!\w)", "", sanitized)
     # Collapse repeated whitespace
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     # If chunk contains no alphanumeric characters, drop it entirely
@@ -220,7 +224,8 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
     """
     Extracts complete sentences ending with '.', '!', '?', or newline from buffer.
     Returns (list_of_completed_sentences, remaining_buffer).
-    Sanitizes each sentence, strips <think> reasoning blocks, and drops punctuation-only fragments.
+    Sanitizes each sentence, strips <think> reasoning blocks, drops punctuation-only fragments,
+    and merges short 1-2 word intro exclamations (e.g. "Great!", "Sure!") into the following sentence.
     """
     # Remove complete <think>...</think> blocks from buffer
     buffer = re.sub(r"<think>.*?</think>", "", buffer, flags=re.DOTALL)
@@ -239,12 +244,27 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
         s = match.group(0).strip()
         if s:
             sanitized = sanitize_for_tts(s)
-            if sanitized:
+            if sanitized and any(c.isalnum() for c in sanitized):
                 sentences.append(sanitized)
         last_end = match.end()
 
+    # Merge very short 1-2 word intro exclamations (e.g. "Great!", "Sure!") with the next sentence
+    merged = []
+    i = 0
+    while i < len(sentences):
+        curr = sentences[i]
+        words = curr.split()
+        if len(words) <= 2 and i + 1 < len(sentences) and any(c.isalnum() for c in curr):
+            next_sent = sentences[i + 1]
+            clean_curr = re.sub(r"[.!?]+$", "", curr)
+            merged.append(f"{clean_curr}, {next_sent[0].lower()}{next_sent[1:]}")
+            i += 2
+        else:
+            merged.append(curr)
+            i += 1
+
     remaining = buffer[last_end:]
-    return sentences, remaining
+    return merged, remaining
 
 
 def run_chat_turn_stream(
