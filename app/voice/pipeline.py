@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import sys
 import time
 import wave
@@ -81,6 +82,25 @@ def load_and_resample_wav(wav_path: str) -> Tuple[bytes, int, int]:
     return audio_int16.tobytes(), framerate, n_channels
 
 
+def sanitize_for_tts(text: str) -> str:
+    """
+    Sanitizes LLM output text prior to TTS synthesis.
+    Strips quote characters (' and "), backticks (`), and markdown asterisks (*).
+    Collapses repeated whitespace.
+    Returns empty string if the sanitized text contains no alphanumeric characters.
+    """
+    if not text:
+        return ""
+    # Strip quotes (' and "), backticks (`), and asterisks (*)
+    sanitized = re.sub(r"['\"`*]", "", text)
+    # Collapse repeated whitespace
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    # If chunk contains no alphanumeric characters, drop it entirely
+    if not any(c.isalnum() for c in sanitized):
+        return ""
+    return sanitized
+
+
 class LLMToolCallingProcessor(FrameProcessor):
     """
     Pipecat FrameProcessor that listens for TranscriptionFrames, streams completed sentences
@@ -107,13 +127,15 @@ class LLMToolCallingProcessor(FrameProcessor):
                     while True:
                         sentence = next(gen)
                         if sentence:
-                            sentences.append(sentence)
-                            logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sentence}'")
-                            await self.push_frame(TextFrame(text=sentence), direction)
+                            sanitized = sanitize_for_tts(sentence)
+                            if sanitized:
+                                sentences.append(sanitized)
+                                logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sanitized}'")
+                                await self.push_frame(TextFrame(text=sanitized), direction)
                 except StopIteration as e:
                     if e.value:
                         full_response, self.history = e.value
-                        self.response_text = full_response
+                        self.response_text = sanitize_for_tts(full_response)
                     else:
                         self.response_text = " ".join(sentences)
                 await self.push_frame(LLMFullResponseEndFrame(), direction)
