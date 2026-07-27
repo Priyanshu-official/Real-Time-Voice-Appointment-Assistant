@@ -17,41 +17,103 @@ client = TestClient(app)
 
 FALLBACK_ERROR_MESSAGE = "Something went wrong. Please call us again after an hour."
 
-SYSTEM_PROMPT = (
-    '''
-    You are a helpful voice appointment assistant for a medical clinic.
-    Speak naturally, concisely, and directly — keep responses to one short sentence per turn whenever possible. Do not speak special characters or format instructions.
-    
-    IMPORTANT INSTRUCTIONS & CONSTRAINTS:
-    - Do NOT use filler phrases like 'Once I have this information...' or 'How else can I help you?'.
-    - GREETING & INTENT FLOW: On the first turn of a session, introduce yourself as the clinic assistant and ask what the caller needs (e.g. 'Hello! Welcome to Medical Clinic. Are you looking to book, reschedule, or cancel an appointment, or do you have a general question?').
-    - CONTEXTUAL AFFIRMATIONS: On subsequent turns, when the caller responds with short words like 'Yeah', 'Yes', 'Sure', or 'Okay', DO NOT repeat the greeting or re-introduce the clinic. Interpret their affirmation directly in the context of your previous question or proposal.
-    - Do NOT ask for patient identity on the first turn or when answering general questions (e.g. clinic hours, services). Only request identity verification when performing patient record actions (booking, cancelling, rescheduling).
-    - DOB & IDENTITY PARSING: Accept natural spoken dates in ANY format (e.g. 'August 22 1992', '22nd of August 1992', '1992 08 22'). Convert the spoken date silently into YYYY-MM-DD format and call `verify_identity` ONLY when all three components (month, day, and year) are present.
-    - PARTIAL DATE GUARD: NEVER call `verify_identity` with a partial date (e.g. year-only or month-only like '1978' or 'December 1978'). If month, day, or year is missing, ask the caller directly for the missing detail (e.g. 'Which day in December were you born?').
-    - NO EXAMPLE FORMATS: NEVER speak example date strings (such as '1992-08-22', 'January 1, 1980', or 'YYYY-MM-DD format') to the caller. Do not tell the caller how to format their input or repeat fake example names like 'John Doe'.
-    - VERIFICATION FAILURE: If `verify_identity` returns verified=false, state politely that the identity details could not be matched with our records, and ask the caller to re-confirm their full name and full date of birth.
-    - VERIFICATION SUCCESS & PERSISTENCE: ONCE `verify_identity` returns verified=false, you may retry. BUT ONCE `verify_identity` returns verified=true, THE PATIENT IS FULLY VERIFIED FOR THE REST OF THE SESSION. NEVER call `verify_identity` again or ask for name/DOB again in this session. Proceed directly to checking availability, proposing bookings, or answering caller questions.
-    
-    TWO-STEP BOOKING FLOW:
-    1. When a patient requests an appointment, first call `propose_booking` to check slot availability and working hours.
-    2. Read the returned proposal summary back to the caller and explicitly wait for their confirmation ('yes' or 'confirm').
-    3. ONLY call `confirm_booking` with the `confirmation_token` AFTER the caller explicitly confirms ('yes'). If the caller says 'no' or asks to change something, do NOT call `confirm_booking` — offer to propose a different time instead.
-    
-    **Available tools**
-    * `verify_identity`: Verify patient identity using first_name, last_name, date_of_birth (YYYY-MM-DD).
-    * `check_availability`: Retrieve open 30-minute appointment slots for a doctor on a date (YYYY-MM-DD).
-    * `propose_booking`: Validate appointment slot and get a confirmation token without writing to the database.
-    * `confirm_booking`: Finalize and write appointment to the database using the confirmation_token.
-    * `cancel_appointment`: Cancel an appointment for a verified patient.
-    * `reschedule_appointment`: Reschedule an appointment for a verified patient.
-    '''
-)
+SYSTEM_PROMPT = """
+You are a voice appointment assistant for Medical Clinic. You are speaking to a caller
+over a live phone/voice connection. Everything you say will be converted to speech by
+a TTS engine, so your output must be clean, natural, spoken English — never
+machine-readable formats, symbols, or notation of any kind.
+
+=====================================================================
+RULE 1 — NEVER SPEAK MACHINE FORMATS OR EXAMPLE STRINGS
+=====================================================================
+- NEVER say ISO 8601 strings, format templates, or examples like:
+  "YYYY-MM-DDTHH:MM:SSZ", "2023-11-16T10:00:00Z", "MM/DD/YYYY", etc.
+- NEVER instruct the caller to provide a date/time in a specific machine format.
+  Callers speak naturally — you must understand and normalize their speech, not the
+  other way around.
+- Ask for dates/times the way a human receptionist would:
+  ✅ "What day and time works best for you?"
+  ✅ "And what's your date of birth?"
+  ❌ "Please provide the date in this format: YYYY-MM-DDTHH:MM:SSZ"
+- Internally, YOU are responsible for converting whatever the caller says
+  ("next Tuesday at 10 in the morning", "November 28th at 10 AM", "nineteen
+  seventy eight, December third") into the ISO 8601 format required by tool calls.
+  The caller must never see or hear that format.
+
+=====================================================================
+RULE 2 — NEVER CALL A TOOL WITH INCOMPLETE OR AMBIGUOUS PARAMETERS
+=====================================================================
+This applies to EVERY tool: verify_identity, book_appointment,
+reschedule_appointment, cancel_appointment, and any other tool you have access to.
+
+Before calling any tool:
+1. Confirm you have ALL required parameters, fully resolved:
+   - verify_identity: full name (first + last) AND complete date of birth
+     (month, day, AND year — all three, unambiguous).
+   - book_appointment / reschedule_appointment: doctor/provider name, AND a
+     fully resolved date (month, day, year) AND time (hour + AM/PM or equivalent).
+   - cancel_appointment: appointment ID or enough identifying detail (doctor,
+     date) to uniquely resolve which appointment.
+2. If ANY component is missing, ambiguous, or was only partially captured
+   (e.g. caller said "1978" but not the month/day, or "Friday" with no time),
+   DO NOT call the tool. Instead, ask the caller specifically for ONLY the
+   missing piece — do not re-ask for information you already have.
+   ✅ "Got the date — what time on the 28th works for you?"
+   ❌ Silently guessing a time and proceeding to call the tool anyway.
+3. If speech-to-text output looks garbled, cut off, or nonsensical (e.g. "to lie",
+   "any ideas scheduling", stray fragments), do NOT treat it as valid input for a
+   tool call. Ask the caller to repeat or clarify rather than guessing or
+   fabricating a value to fill the gap.
+4. Never fabricate, infer, or "round to the nearest reasonable value" for any
+   parameter. If you are not certain, ask.
+
+=====================================================================
+RULE 3 — IDENTITY VERIFICATION IS STICKY
+=====================================================================
+- Once verify_identity returns verified=true, identity is locked as verified
+  for the remainder of the session. Do NOT re-ask for name or date of birth
+  again in this call, even if the topic changes (e.g. moving from reschedule
+  to booking a new appointment).
+
+=====================================================================
+RULE 4 — CONTEXTUAL AFFIRMATIONS
+=====================================================================
+- Distinguish between a caller's first utterance (e.g. "Hi", "Hello") which
+  warrants the full greeting, and a mid-conversation short affirmative
+  ("Yeah", "Sure", "Okay") which should NOT re-trigger the greeting or reset
+  the flow — treat it as confirmation of the immediately preceding question.
+
+=====================================================================
+RULE 5 — SPOKEN TEXT HYGIENE
+=====================================================================
+- Every sentence you emit must contain at least one full word — never emit a
+  standalone punctuation mark, single letter, or fragment as its own sentence
+  (e.g. never emit "." or "!" alone).
+- When combining short exclamations with a following sentence (e.g. "Got it!"
+  + "Dr. Smith on tomorrow."), always ensure a single space separates them.
+  Never allow two sentences or abbreviations to be concatenated with no space
+  (e.g. "Dr.Smith" is invalid — it must render as "Dr. Smith").
+- Preserve natural contractions ("what's", "it's", "let's") — do not strip
+  their apostrophes.
+- Do not use unnecessary quotation marks or all-caps emphasis in spoken text.
+
+=====================================================================
+RULE 6 — CLARIFY BEFORE ACTING, ALWAYS
+=====================================================================
+When in doubt about ANY tool call parameter, prefer asking a short, specific
+clarifying question over calling the tool. A single well-placed question is
+always better than a failed tool call, an incorrect booking, or a fabricated
+value.
+"""
+
+
+from app.api.services.scheduling import normalize_datetime_utterance
 
 
 def execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """
     Executes a tool call against the local FastAPI application.
+    Validates datetime parameters using normalize_datetime_utterance before calling scheduling APIs.
     """
     if name == "verify_identity":
         res = client.post("/verify-identity", json=args)
@@ -59,25 +121,71 @@ def execute_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "check_availability":
         doctor_id = args.get("doctor_id")
         date_str = args.get("date")
+        if date_str and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date_str)):
+            iso_str, _ = normalize_datetime_utterance(f"{date_str} at 10 AM")
+            if iso_str:
+                date_str = iso_str.split("T")[0]
         res = client.get(f"/doctors/{doctor_id}/availability?date={date_str}")
         return res.json()
-    elif name == "propose_booking":
-        res = client.post("/appointments/propose", json=args)
-        return res.json()
+    elif name in ("propose_booking", "book_appointment", "reschedule_appointment"):
+        raw_datetime = args.get("start_time") or args.get("new_start_time")
+        if not raw_datetime:
+            return {
+                "status": "needs_clarification",
+                "error": "Missing appointment date/time parameter. Please ask the caller specifically for the date and time.",
+            }
+        
+        iso_str, reason = normalize_datetime_utterance(str(raw_datetime))
+        if not iso_str:
+            return {
+                "status": "needs_clarification",
+                "error": f"Invalid or incomplete appointment date/time parameter ({reason}). Do not guess — ask the caller specifically for the missing date or time.",
+            }
+
+        # Update payload with normalized ISO 8601 string
+        if "start_time" in args:
+            args["start_time"] = iso_str
+        if "new_start_time" in args:
+            args["new_start_time"] = iso_str
+
+        # Ensure end_time is present and valid
+        end_val = args.get("end_time") or args.get("new_end_time")
+        if end_val:
+            end_iso, _ = normalize_datetime_utterance(str(end_val))
+            if end_iso:
+                if "end_time" in args:
+                    args["end_time"] = end_iso
+                if "new_end_time" in args:
+                    args["new_end_time"] = end_iso
+        else:
+            from datetime import datetime, timedelta, timezone
+            dt_start = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            dt_end = dt_start + timedelta(minutes=30)
+            end_iso = dt_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if "end_time" in args:
+                args["end_time"] = end_iso
+            elif "new_end_time" in args:
+                args["new_end_time"] = end_iso
+            elif name == "propose_booking":
+                args["end_time"] = end_iso
+
+        if name == "propose_booking":
+            res = client.post("/appointments/propose", json=args)
+            return res.json()
+        elif name == "book_appointment":
+            res = client.post("/appointments", json=args)
+            return res.json()
+        elif name == "reschedule_appointment":
+            appointment_id = args.get("appointment_id")
+            res = client.patch(f"/appointments/{appointment_id}", json=args)
+            return res.json()
     elif name == "confirm_booking":
         res = client.post("/appointments/confirm", json=args)
-        return res.json()
-    elif name == "book_appointment":
-        res = client.post("/appointments", json=args)
         return res.json()
     elif name == "cancel_appointment":
         appointment_id = args.get("appointment_id")
         patient_id = args.get("patient_id")
         res = client.delete(f"/appointments/{appointment_id}?patient_id={patient_id}")
-        return res.json()
-    elif name == "reschedule_appointment":
-        appointment_id = args.get("appointment_id")
-        res = client.patch(f"/appointments/{appointment_id}", json=args)
         return res.json()
     else:
         return {"error": f"Unknown tool: {name}"}
@@ -220,12 +328,27 @@ def sanitize_for_tts(text: str) -> str:
     return sanitized
 
 
+def format_tts_text(sentences: List[str]) -> str:
+    """
+    Ensures sentence fragments are always joined with a single space, stripping leading/trailing
+    whitespace and preventing run-on punctuation artifacts (e.g. "Dr.Smith" -> "Dr. Smith").
+    """
+    if not sentences:
+        return ""
+    cleaned = [s.strip() for s in sentences if s and s.strip()]
+    merged = " ".join(cleaned)
+    # Ensure a single space after sentence/title punctuation preceding a word character
+    merged = re.sub(r"(\b[A-Za-z]+[.!?])([A-Za-z])", r"\1 \2", merged)
+    return merged
+
+
 def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
     """
     Extracts complete sentences ending with '.', '!', '?', or newline from buffer.
     Returns (list_of_completed_sentences, remaining_buffer).
     Sanitizes each sentence, strips <think> reasoning blocks, drops punctuation-only fragments,
     and merges short 1-2 word intro exclamations (e.g. "Great!", "Sure!") into the following sentence.
+    Does NOT break or mangle title abbreviations (e.g. "Dr.", "Mr.").
     """
     # Remove complete <think>...</think> blocks from buffer
     buffer = re.sub(r"<think>.*?</think>", "", buffer, flags=re.DOTALL)
@@ -234,7 +357,8 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
     if "<think>" in buffer.lower() and "</think>" not in buffer.lower():
         return [], buffer
 
-    matches = list(re.finditer(r".*?[.!?\n]+(?:\s+|$)", buffer, flags=re.DOTALL))
+    pattern = r".*?(?:(?<!\bDr)(?<!\bMr)(?<!\bMrs)(?<!\bMs)(?<!\bProf)(?<!\bSt)[.!?\n]+(?:\s+|$))"
+    matches = list(re.finditer(pattern, buffer, flags=re.DOTALL))
     if not matches:
         return [], buffer
 
@@ -248,13 +372,21 @@ def extract_sentences_from_buffer(buffer: str) -> Tuple[List[str], str]:
                 sentences.append(sanitized)
         last_end = match.end()
 
-    # Merge very short 1-2 word intro exclamations (e.g. "Great!", "Sure!") with the next sentence
+    # Merge very short 1-2 word intro exclamations (e.g. "Great!", "Sure!") with the next sentence,
+    # skipping title abbreviations (e.g. "Dr.", "Mr.")
     merged = []
     i = 0
+    abbrevs = {"dr", "mr", "mrs", "ms", "prof", "st"}
     while i < len(sentences):
         curr = sentences[i]
         words = curr.split()
-        if len(words) <= 2 and i + 1 < len(sentences) and any(c.isalnum() for c in curr):
+        clean_curr_lower = re.sub(r"[.!?]+$", "", curr.lower())
+        if (
+            len(words) <= 2
+            and i + 1 < len(sentences)
+            and any(c.isalnum() for c in curr)
+            and clean_curr_lower not in abbrevs
+        ):
             next_sent = sentences[i + 1]
             clean_curr = re.sub(r"[.!?]+$", "", curr)
             merged.append(f"{clean_curr}, {next_sent[0].lower()}{next_sent[1:]}")
@@ -386,4 +518,4 @@ def run_chat_turn(
             final_text, updated_history = e.value
             return final_text, updated_history
         else:
-            return " ".join(sentences), history
+            return format_tts_text(sentences), history

@@ -25,6 +25,8 @@ During live voice testing, several interaction bugs were identified:
 | `ISSUE-008` | **Minor** | TTS speaking lone punctuation fragments (`"."`, `"!"`, `"'"`)| `FIX-LOG-008` | Require `any(c.isalnum() for c in text)` check in `LLMToolCallingProcessor` before pushing `TextFrame` objects down to `PiperTTSService`. |
 | `ISSUE-009` | **Minor** | Short affirmations (*"Yeah"*, *"Hi"*) on first turn triggering full greeting | `FIX-LOG-009` | Add `CONTEXTUAL AFFIRMATIONS` rule in `SYSTEM_PROMPT` distinguishing initial turn greetings from mid-turn affirmative answers. |
 | `ISSUE-010` | **Minor** | TTS mispronouncing contractions (*"whats"*, *"Im"*) and shouting 1-word exclamations (*"Great!"*) | `FIX-LOG-010` | Update `sanitize_for_tts` to preserve contraction apostrophes (*"what's"*, *"It's"*) while stripping outer quotes, and merge short 1-word exclamations into the following sentence in `extract_sentences_from_buffer`. |
+| `ISSUE-011` | **Minor** | TTS sentence-join regression (no separator between sentence fragments, e.g., *"Dr.Smith"*) | `FIX-LOG-011` | Protect title abbreviations (`Dr.`, `Mr.`, `Mrs.`) in `extract_sentences_from_buffer` and enforce single-space joining in `format_tts_text`. |
+| `ISSUE-012` | **Major** | Appointment date/time requested in ISO 8601 format; no natural-language normalizer for scheduling | `FIX-LOG-012` | Implement `normalize_datetime_utterance()` in `app/api/services/scheduling.py` and enforce parameter completeness checks on scheduling tool calls. |
 
 ## Decision
 

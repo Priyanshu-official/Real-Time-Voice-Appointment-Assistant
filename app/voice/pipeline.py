@@ -41,7 +41,7 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 
 from app.api.config import get_settings
-from app.voice.llm_client import run_chat_turn, run_chat_turn_stream, sanitize_for_tts
+from app.voice.llm_client import format_tts_text, run_chat_turn, run_chat_turn_stream, sanitize_for_tts
 
 
 class LLMToolCallingProcessor(FrameProcessor):
@@ -85,7 +85,7 @@ class LLMToolCallingProcessor(FrameProcessor):
                         full_response, self.history = e.value
                         self.response_text = sanitize_for_tts(full_response)
                     else:
-                        self.response_text = " ".join(sentences)
+                        self.response_text = format_tts_text(sentences)
                 await self.push_frame(LLMFullResponseEndFrame(), direction)
                 logger.info(f"[LLM] Full response completed: '{self.response_text}'")
         else:
