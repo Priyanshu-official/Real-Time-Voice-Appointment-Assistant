@@ -76,7 +76,7 @@ class LLMToolCallingProcessor(FrameProcessor):
                         sentence = next(gen)
                         if sentence:
                             sanitized = sanitize_for_tts(sentence)
-                            if sanitized:
+                            if sanitized and any(c.isalnum() for c in sanitized):
                                 sentences.append(sanitized)
                                 logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sanitized}'")
                                 await self.push_frame(TextFrame(text=sanitized), direction)

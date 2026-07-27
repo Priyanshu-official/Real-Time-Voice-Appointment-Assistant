@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     - PARTIAL DATE GUARD: NEVER call `verify_identity` with a partial date (e.g. year-only or month-only like '1978' or 'December 1978'). If month, day, or year is missing, ask the caller directly for the missing detail (e.g. 'Which day in December were you born?').
     - NO EXAMPLE FORMATS: NEVER speak example date strings (such as '1992-08-22', 'January 1, 1980', or 'YYYY-MM-DD format') to the caller. Do not tell the caller how to format their input or repeat fake example names like 'John Doe'.
     - VERIFICATION FAILURE: If `verify_identity` returns verified=false, state politely that the identity details could not be matched with our records, and ask the caller to re-confirm their full name and full date of birth.
-    - VERIFICATION SUCCESS: When `verify_identity` succeeds, proceed directly to slot availability and booking without repeating identity questions.
+    - VERIFICATION SUCCESS & PERSISTENCE: ONCE `verify_identity` returns verified=false, you may retry. BUT ONCE `verify_identity` returns verified=true, THE PATIENT IS FULLY VERIFIED FOR THE REST OF THE SESSION. NEVER call `verify_identity` again or ask for name/DOB again in this session. Proceed directly to checking availability, proposing bookings, or answering caller questions.
     
     TWO-STEP BOOKING FLOW:
     1. When a patient requests an appointment, first call `propose_booking` to check slot availability and working hours.

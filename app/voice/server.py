@@ -92,7 +92,7 @@ async def websocket_endpoint(websocket: WebSocket):
         params=VADParams(
             confidence=0.7,
             start_secs=0.3,
-            stop_secs=0.4,
+            stop_secs=0.2,
             min_volume=0.6,
         ),
     )
