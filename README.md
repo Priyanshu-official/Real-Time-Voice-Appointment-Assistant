@@ -218,15 +218,16 @@ python tests/load/load_test.py
 
 ---
 
-## 👤 Sample Patient Identities for Testing
+## 👤 Sample Patient Identities & Active Appointments
 
-The system comes pre-seeded with sample patient records ready for instant live demonstration:
+The system comes pre-seeded with sample patient records matching the live PostgreSQL database for testing and demonstration:
 
-| Patient Name | Date of Birth (DOB) | Phone (Last 4) | Patient ID | Pre-seeded Condition / Test Case |
-|---|---|---|---|---|
-| **John Doe** | `1985-05-15` | `4321` | `1` | Has existing appointment; test reschedule / cancellation |
-| **Jane Smith** | `1990-08-22` | `8765` | `2` | Test new appointment booking & availability check |
-| **Alice Johnson** | `1978-11-30` | `1122` | `3` | Test identity verification challenge & general inquiry |
+| Patient Name | Date of Birth (DOB) | Phone (Last 4) | Patient ID | Active Appointment | Pre-seeded Test Case |
+|---|---|---|---|---|---|
+| **John Doe** | `1985-05-15` | `0101` | `38` | Appt ID `3313` (Dr. Sarah Connor, July 30) | Test appointment reschedule & cancellation |
+| **Jane Smith** | `1992-08-22` | `0102` | `39` | Appt ID `2752` (Dr. Emily Wong, July 29) | Test appointment lookup & slot verification |
+| **Alice Johnson** | `1978-12-03` | `0103` | `40` | *None* | Test identity challenge & new booking |
+| **Alice Test** | `1990-01-01` | `0001` | `1` | Appt ID `1` (Dr. Smith, July 28) | Test doctor working hours & availability |
 
 ---
 
