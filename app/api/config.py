@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen2.5:7b-instruct-q4_K_M"
     LLM_API_KEY: Optional[str] = None
     LLM_API_BASE: Optional[str] = None
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_PROJECT: str = "clinic-voice-assistant"
 
     model_config = SettingsConfigDict(
         env_file=".env",
