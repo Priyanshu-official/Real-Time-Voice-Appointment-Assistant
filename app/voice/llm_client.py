@@ -846,12 +846,12 @@ def _try_auto_verify_identity_fallback(messages: List[Dict[str, Any]]) -> Option
 
     last_user_msg = user_msgs[-1].strip()
     name_match = re.search(
-        r"\b(?:my name is|I am|I'm|this is)?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)\b",
+        r"\b(?:my name is|I am|I'm|this is)?\s*([A-Za-z_0-9-]+)\s+([A-Za-z_0-9-]+)\b",
         last_user_msg,
     )
     if not name_match:
         name_match = re.search(
-            r"\b(?:my name is|I am|I'm|this is)?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)\b",
+            r"\b(?:my name is|I am|I'm|this is)?\s*([A-Za-z_0-9-]+)\s+([A-Za-z_0-9-]+)\b",
             recent_user_text,
         )
 

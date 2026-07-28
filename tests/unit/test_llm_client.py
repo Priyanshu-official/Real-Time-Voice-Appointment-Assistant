@@ -422,7 +422,7 @@ def test_sanitize_for_tts_strips_fake_tool_confirmations():
     cleaned_booking_valid = sanitize_func(raw_booking, has_tool_success=True)
     assert "is confirmed" in cleaned_booking_valid or "confirmed" in cleaned_booking_valid
 
-def test_auto_verify_identity_fallback():
+def test_auto_verify_identity_fallback(llm_test_patient):
     """
     Verifies _try_auto_verify_identity_fallback automatically executes verify_identity
     when full name and DOB exist in conversation history.
@@ -430,16 +430,17 @@ def test_auto_verify_identity_fallback():
     from app.voice.llm_client import _try_auto_verify_identity_fallback
 
     messages = [
-        {"role": "user", "content": "My date of birth is August 22, 1992."},
+        {"role": "user", "content": f"My date of birth is July 20, 1985."},
         {"role": "assistant", "content": "Thank you. What is your full name?"},
-        {"role": "user", "content": "Jane Smith"},
+        {"role": "user", "content": f"{llm_test_patient.first_name} {llm_test_patient.last_name}"},
     ]
 
     tc = _try_auto_verify_identity_fallback(messages)
     assert tc is not None
     assert tc["function"]["name"] == "verify_identity"
-    assert tc["function"]["arguments"]["first_name"] == "Jane"
-    assert tc["function"]["arguments"]["date_of_birth"] == "1992-08-22"
+    assert tc["function"]["arguments"]["first_name"] == llm_test_patient.first_name
+    assert tc["function"]["arguments"]["last_name"] == llm_test_patient.last_name
+    assert tc["function"]["arguments"]["date_of_birth"] == "1985-07-20"
 
 
 
