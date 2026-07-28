@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -62,6 +62,50 @@ class AppointmentResponse(BaseModel):
     end_time: str
     status: str
     reason: Optional[str] = None
+
+
+class AppointmentDetailedResponse(BaseModel):
+    id: int
+    doctor_id: int
+    doctor_name: str
+    patient_id: int
+    patient_name: str
+    start_time: str
+    end_time: str
+    status: str
+    reason: Optional[str] = None
+
+
+@router.get("", response_model=List[AppointmentDetailedResponse])
+def get_upcoming_appointments(
+    db: Session = Depends(get_db),
+):
+    appts = (
+        db.query(Appointment, Doctor, Patient)
+        .join(Doctor, Appointment.doctor_id == Doctor.id)
+        .join(Patient, Appointment.patient_id == Patient.id)
+        .filter(Appointment.status != "cancelled")
+        .order_by(Appointment.appointment_range)
+        .all()
+    )
+    results = []
+    for appt, doc, pat in appts:
+        doc_name = doc.name if doc.name.startswith("Dr.") else f"Dr. {doc.name}"
+        pat_name = f"{pat.first_name} {pat.last_name}"
+        results.append(
+            AppointmentDetailedResponse(
+                id=appt.id,
+                doctor_id=doc.id,
+                doctor_name=doc_name,
+                patient_id=pat.id,
+                patient_name=pat_name,
+                start_time=appt.appointment_range.lower.isoformat(),
+                end_time=appt.appointment_range.upper.isoformat(),
+                status=appt.status,
+                reason=appt.reason,
+            )
+        )
+    return results
 
 
 @router.post("/propose", response_model=ProposeBookingResponse)

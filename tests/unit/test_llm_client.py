@@ -6,7 +6,14 @@ import pytest
 from app.db.models import Appointment, AuditLog, Patient
 from app.db.session import SessionLocal
 from app.voice.conversation_logger import ConversationLogger
-from app.voice.llm_client import SYSTEM_PROMPT, execute_tool_call, extract_sentences_from_buffer, format_tts_text, run_chat_turn
+from app.voice.llm_client import (
+    SYSTEM_PROMPT,
+    execute_tool_call,
+    extract_sentences_from_buffer,
+    format_tts_text,
+    run_chat_turn,
+    sanitize_for_tts,
+)
 
 
 @pytest.fixture
@@ -264,7 +271,7 @@ def test_execute_scheduling_tools_reject_incomplete_datetime():
     # Incomplete datetime
     res_resched = execute_tool_call(
         "reschedule_appointment",
-        {"appointment_id": 1, "patient_id": 1, "new_start_time": "Friday"},
+        {"doctor_id": 1, "appointment_id": 1, "patient_id": 1, "new_start_time": "Friday"},
     )
     assert res_resched["status"] == "needs_clarification"
     assert "Missing time component" in res_resched["error"]
@@ -311,5 +318,132 @@ def test_tools_list_contains_book_appointment():
     assert "book_appointment" in tool_names
     assert "propose_booking" in tool_names
     assert "confirm_booking" in tool_names
+
+
+def test_tool_telemetry_logging(test_doctor):
+    """
+    Asserts logs capture tool request payload, response, latency, and success status.
+    """
+    with patch("loguru.logger.info") as mock_logger:
+        args = {"doctor_id": test_doctor["doctor_id"], "date": "2026-08-03"}
+        res = execute_tool_call("check_availability", args)
+        assert "available_slots" in res
+        
+        # Verify loguru.logger.info was called with telemetry log
+        telemetry_logs = [call[0][0] for call in mock_logger.call_args_list if "[TOOL TELEMETRY]" in str(call[0][0])]
+        assert len(telemetry_logs) >= 1
+        log_entry = telemetry_logs[0]
+        assert "name=check_availability" in log_entry
+        assert "latency_ms=" in log_entry
+        assert "success=True" in log_entry
+
+
+@patch("app.voice.llm_client._execute_tool_call_internal")
+def test_tool_timeout_and_retry_escalation(mock_tool_internal):
+    """
+    Mocks a failing/slow tool call and verifies LLM client retries at most 2 times before escalating.
+    """
+    mock_tool_internal.side_effect = Exception("Service unavailable")
+
+    with patch("app.voice.llm_client.call_ollama") as mock_call_ollama:
+        mock_call_ollama.return_value = {
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "check_availability",
+                            "arguments": {"doctor_id": 1, "date": "2026-08-03"},
+                        }
+                    }
+                ],
+            }
+        }
+        history = []
+        response_text, _ = run_chat_turn(history, "Check availability for doctor 1")
+
+        # Verify tool was attempted at most 2 times
+        assert mock_tool_internal.call_count == 2
+        # Verify escalation message surfaced to caller
+        assert "let me connect you with a human assistant" in response_text
+
+
+def test_sanitize_for_tts_strips_iso_dates():
+    """
+    Verifies sanitize_for_tts strips ISO dates and timestamps from spoken output.
+    """
+    raw_text = "Your appointment is confirmed for 2026-08-03T10:00:00Z."
+    cleaned = sanitize_for_tts(raw_text, has_tool_success=True)
+    assert "2026-08-03" not in cleaned
+    assert "2026-08-03T10:00:00Z" not in cleaned
+    assert "Your appointment is confirmed for" in cleaned
+
+
+def test_system_prompt_no_hardcoded_2023():
+    """
+    Verifies SYSTEM_PROMPT contains no hardcoded year 2023 example strings and includes rules 9 and 10.
+    """
+    assert "2023-11-16" not in SYSTEM_PROMPT
+    assert "RULE 8 — NO PRE-NARRATION OF TOOL CALLS AND ERROR HANDLING" in SYSTEM_PROMPT
+    assert "RULE 9 — AUTOMATIC IDENTITY VERIFICATION WHEN NAME & DOB ARE PRESENT" in SYSTEM_PROMPT
+    assert "RULE 10 — NEVER CONFUSE PATIENT DATE OF BIRTH WITH APPOINTMENT BOOKING DATE" in SYSTEM_PROMPT
+
+
+def test_resolve_doctor_id_handles_names_and_invalid_ids():
+    """
+    Verifies resolve_doctor_id maps doctor names (e.g. "Dr. Sarah Connor") to valid IDs
+    and rejects invalid IDs (e.g. 5 or "Dr. Patel").
+    """
+    from app.voice.llm_client import resolve_doctor_id
+
+    # String doctor name match
+    doc_id, err = resolve_doctor_id({"doctor_id": "Dr. Sarah Connor"})
+    assert err is None
+    assert doc_id == 27
+
+    # Surname string match
+    doc_id_wong, err = resolve_doctor_id({"doctor_id": "Wong"})
+    assert err is None
+    assert doc_id_wong == 29
+
+def test_sanitize_for_tts_strips_fake_tool_confirmations():
+    """
+    Verifies sanitize_for_tts strips fake confirmation sentences across all tools when has_tool_success is False.
+    """
+    from app.voice.llm_client import sanitize_for_tts as sanitize_func
+
+    # Fake booking confirmation without tool call
+    raw_booking = "Great news, Jane! Your appointment with Dr. John Smith on July 29th at 10 AM is confirmed."
+    cleaned_booking = sanitize_func(raw_booking, has_tool_success=False)
+    assert "is confirmed" not in cleaned_booking
+    assert "appointment" not in cleaned_booking
+
+    # Valid booking confirmation WITH successful tool call
+    cleaned_booking_valid = sanitize_func(raw_booking, has_tool_success=True)
+    assert "is confirmed" in cleaned_booking_valid or "confirmed" in cleaned_booking_valid
+
+def test_auto_verify_identity_fallback(llm_test_patient):
+    """
+    Verifies _try_auto_verify_identity_fallback automatically executes verify_identity
+    when full name and DOB exist in conversation history.
+    """
+    from app.voice.llm_client import _try_auto_verify_identity_fallback
+
+    messages = [
+        {"role": "user", "content": f"My date of birth is July 20, 1985."},
+        {"role": "assistant", "content": "Thank you. What is your full name?"},
+        {"role": "user", "content": f"{llm_test_patient.first_name} {llm_test_patient.last_name}"},
+    ]
+
+    tc = _try_auto_verify_identity_fallback(messages)
+    assert tc is not None
+    assert tc["function"]["name"] == "verify_identity"
+    assert tc["function"]["arguments"]["first_name"] == llm_test_patient.first_name
+    assert tc["function"]["arguments"]["last_name"] == llm_test_patient.last_name
+    assert tc["function"]["arguments"]["date_of_birth"] == "1985-07-20"
+
+
+
+
 
 

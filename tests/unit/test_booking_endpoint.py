@@ -239,3 +239,20 @@ def test_booking_endpoint_concurrency(verified_booking_setup):
 
     assert successes == 1, f"Expected 1 success, got {successes} (statuses: {statuses})"
     assert conflicts == num_threads - 1, f"Expected {num_threads - 1} conflicts, got {conflicts}"
+
+
+def test_get_upcoming_appointments():
+    """
+    Verifies GET /appointments returns a list of appointments containing doctor_name and patient_name.
+    """
+    response = client.get("/appointments")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    if data:
+        first = data[0]
+        assert "doctor_name" in first
+        assert "patient_name" in first
+        assert "start_time" in first
+        assert "end_time" in first
+        assert "status" in first

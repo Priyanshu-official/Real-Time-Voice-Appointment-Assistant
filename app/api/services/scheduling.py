@@ -125,6 +125,8 @@ def normalize_datetime_utterance(
     ref_dt = reference_datetime or datetime.now(timezone.utc)
     ref_base = ref_dt.replace(tzinfo=None) if ref_dt.tzinfo else ref_dt
 
+    has_explicit_year = bool(re.search(r"\b(19|20)\d{2}\b", raw_text))
+
     try:
         parsed = dateparser.parse(
             preprocessed,
@@ -140,6 +142,13 @@ def normalize_datetime_utterance(
 
     if parsed is None:
         return None, f"Unparseable date/time utterance: '{utterance}'"
+
+    # If no explicit 4-digit year was supplied and parsed datetime is in the past relative to reference, roll forward
+    if not has_explicit_year and parsed < ref_base:
+        try:
+            parsed = parsed.replace(year=parsed.year + 1)
+        except ValueError:
+            parsed = parsed.replace(year=parsed.year + 1, day=28)
 
     # Make aware as UTC
     parsed_utc = parsed.replace(tzinfo=timezone.utc)

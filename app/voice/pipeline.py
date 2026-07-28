@@ -68,6 +68,7 @@ class LLMToolCallingProcessor(FrameProcessor):
             if text:
                 self.transcribed_text = text
                 logger.info(f"[STT] Transcribed user audio: '{text}'")
+                await self.push_frame(InterruptionFrame(), direction)
                 await self.push_frame(LLMFullResponseStartFrame(), direction)
                 gen = run_chat_turn_stream(self.history, text, logger_instance=self.logger_instance)
                 sentences = []
@@ -79,7 +80,7 @@ class LLMToolCallingProcessor(FrameProcessor):
                             if sanitized and any(c.isalnum() for c in sanitized):
                                 sentences.append(sanitized)
                                 logger.info(f"[LLM Stream] Emitting sentence to TTS: '{sanitized}'")
-                                await self.push_frame(TextFrame(text=sanitized), direction)
+                                await self.push_frame(TextFrame(text=f"{sanitized} "), direction)
                 except StopIteration as e:
                     if e.value:
                         full_response, self.history = e.value
