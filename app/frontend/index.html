@@ -1,52 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-Time Voice Appointment Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
+            --bg-color: #0b0f19;
+            --card-bg: #151c2c;
+            --card-border: rgba(255, 255, 255, 0.08);
             --accent-color: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.25);
             --accent-active: #0284c7;
             --text-color: #f8fafc;
             --text-muted: #94a3b8;
             --danger-color: #ef4444;
             --success-color: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.2);
+            --badge-bg: rgba(56, 189, 248, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem 1.5rem;
         }
 
-        .container {
-            background-color: var(--card-bg);
-            border-radius: 16px;
-            padding: 2.5rem;
+        header {
+            max-width: 1200px;
+            margin: 0 auto 2rem auto;
             width: 100%;
-            max-width: 480px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--accent-color), #6366f1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: #000;
+            box-shadow: 0 4px 12px var(--accent-glow);
         }
 
         h1 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            color: var(--accent-color);
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #ffffff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
-        p.subtitle {
+        .dashboard-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 1.75rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+        }
+
+        .voice-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .subtitle {
             color: var(--text-muted);
-            font-size: 0.9rem;
-            margin-bottom: 2rem;
+            font-size: 0.85rem;
+            margin-bottom: 1.5rem;
         }
 
         .status-badge {
@@ -55,80 +130,257 @@
             gap: 8px;
             padding: 8px 16px;
             border-radius: 9999px;
-            background-color: rgba(255, 255, 255, 0.05);
-            font-size: 0.875rem;
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.85rem;
             font-weight: 500;
             margin-bottom: 2rem;
         }
 
         .status-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background-color: var(--text-muted);
+            transition: all 0.3s ease;
         }
 
         .status-dot.active {
             background-color: var(--success-color);
-            box-shadow: 0 0 10px var(--success-color);
+            box-shadow: 0 0 12px var(--success-color);
         }
 
         .status-dot.speaking {
             background-color: var(--accent-color);
-            box-shadow: 0 0 10px var(--accent-color);
+            box-shadow: 0 0 12px var(--accent-color);
         }
 
         .call-btn {
-            width: 100px;
-            height: 100px;
+            width: 96px;
+            height: 96px;
             border-radius: 50%;
             border: none;
-            background-color: var(--accent-color);
+            background: linear-gradient(135deg, var(--accent-color), #0284c7);
             color: #000;
             font-size: 1.1rem;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.2s ease-in-out;
-            display: inline-flex;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
             justify-content: center;
             align-items: center;
             margin-bottom: 1.5rem;
-            box-shadow: 0 10px 15px -3px rgba(56, 189, 248, 0.4);
+            box-shadow: 0 10px 25px -5px var(--accent-glow);
         }
 
         .call-btn:hover {
             transform: scale(1.05);
-            background-color: var(--accent-active);
+            box-shadow: 0 15px 30px -5px rgba(56, 189, 248, 0.4);
             color: #fff;
         }
 
         .call-btn.active {
-            background-color: var(--danger-color);
+            background: linear-gradient(135deg, var(--danger-color), #dc2626);
             color: #fff;
-            box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.4);
         }
 
         .hint {
             font-size: 0.8rem;
             color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* Appointments Panel Styling */
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        th {
+            color: var(--text-muted);
+            font-weight: 500;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--card-border);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .patient-cell {
+            font-weight: 600;
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .avatar-circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .doctor-cell {
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        .datetime-cell {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .datetime-main {
+            color: var(--text-color);
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .badge-booked {
+            background-color: var(--success-glow);
+            color: var(--success-color);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-proposed {
+            background-color: var(--badge-bg);
+            color: var(--accent-color);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
         }
     </style>
 </head>
+
 <body>
-    <div class="container">
-        <h1>Voice Appointment Assistant</h1>
-        <p class="subtitle">Real-time voice assistant with instant barge-in support</p>
+    <header>
+        <div class="brand">
+            <div class="brand-icon">🎙️</div>
+            <h1>Medical Clinic Assistant</h1>
+        </div>
+    </header>
 
-        <div class="status-badge">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">Disconnected</span>
+    <div class="dashboard-grid">
+        <!-- Voice Assistant Widget -->
+        <div class="card voice-card">
+            <div class="card-title">Voice Assistant</div>
+            <p class="subtitle">Real-time voice booking with instant barge-in</p>
+
+            <div class="status-badge">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+
+            <div>
+                <button class="call-btn" id="callBtn">Call</button>
+            </div>
+
+            <p class="hint">Click "Call" to start speaking. Speak anytime to interrupt the assistant.</p>
         </div>
 
-        <div>
-            <button class="call-btn" id="callBtn">Call</button>
-        </div>
+        <!-- Upcoming Appointments Card -->
+        <div class="card">
+            <div class="header-actions">
+                <div>
+                    <div class="card-title">📅 Upcoming Appointments</div>
+                    <p class="subtitle" style="margin-bottom: 0;">Live scheduled patient appointments</p>
+                </div>
+                <button class="refresh-btn" id="refreshBtn">🔄 Refresh</button>
+            </div>
 
-        <p class="hint">Click "Call" to start speaking. Speak anytime to interrupt (barge-in).</p>
+            <div class="table-container">
+                <table id="appointmentsTable">
+                    <thead>
+                        <tr>
+                            <th>Patient Name</th>
+                            <th>Doctor Name</th>
+                            <th>Date & Time</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appointmentsList">
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">Loading appointments...</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -143,6 +395,8 @@
         const callBtn = document.getElementById('callBtn');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const appointmentsList = document.getElementById('appointmentsList');
 
         function updateStatus(text, state) {
             statusText.textContent = text;
@@ -155,16 +409,157 @@
             scheduledAudioSources.forEach(source => {
                 try {
                     source.stop();
-                } catch (e) {}
+                } catch (e) { }
             });
             scheduledAudioSources = [];
             nextPlayTime = 0;
         }
 
+        async function fetchUpcomingAppointments() {
+            try {
+                const baseUrl = (window.location.protocol === 'file:' || !window.location.host)
+                    ? 'http://localhost:8000'
+                    : `${window.location.protocol}//${window.location.host}`;
+                const res = await fetch(`${baseUrl}/appointments`);
+                if (!res.ok) {
+                    appointmentsList.innerHTML = `
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">
+                                    <div class="empty-icon">⚠️</div>
+                                    <p>Unable to load appointments (${res.status})</p>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+                const appointments = await res.json();
+                renderAppointments(appointments);
+            } catch (err) {
+                console.error('Failed to fetch appointments:', err);
+                appointmentsList.innerHTML = `
+                    <tr>
+                        <td colspan="4">
+                            <div class="empty-state">
+                                <div class="empty-icon">⚠️</div>
+                                <p>Failed to connect to server</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function formatDateTime(isoString) {
+            try {
+                if (!isoString) return { dateStr: 'N/A', timeStr: 'N/A' };
+                const dt = new Date(isoString);
+                if (isNaN(dt.getTime())) return { dateStr: 'Invalid Date', timeStr: 'N/A' };
+
+                let dateStr, timeStr;
+                try {
+                    dateStr = dt.toLocaleDateString('en-US', {
+                        timeZone: 'Asia/Kolkata',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                    });
+                    timeStr = dt.toLocaleTimeString('en-US', {
+                        timeZone: 'Asia/Kolkata',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                    });
+                } catch (tzErr) {
+                    dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    timeStr = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                }
+                return { dateStr, timeStr: `${timeStr} IST` };
+            } catch (e) {
+                return { dateStr: 'N/A', timeStr: 'N/A' };
+            }
+        }
+
+        function renderAppointments(list) {
+            try {
+                if (!list || !Array.isArray(list) || list.length === 0) {
+                    appointmentsList.innerHTML = `
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">
+                                    <div class="empty-icon">📅</div>
+                                    <p>No upcoming appointments found.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                appointmentsList.innerHTML = list.map(item => {
+                    if (!item) return '';
+                    const { dateStr, timeStr } = formatDateTime(item.start_time);
+                    const patientName = item.patient_name || 'Unknown Patient';
+                    const doctorName = item.doctor_name || 'Clinic Doctor';
+                    const initials = patientName
+                        .split(' ')
+                        .filter(Boolean)
+                        .map(n => n[0])
+                        .join('')
+                        .substring(0, 2)
+                        .toUpperCase() || 'P';
+
+                    const statusText = item.status || 'booked';
+                    const badgeClass = statusText === 'booked' ? 'badge-booked' : 'badge-proposed';
+
+                    return `
+                        <tr>
+                            <td>
+                                <div class="patient-cell">
+                                    <div class="avatar-circle">${initials}</div>
+                                    <span>${patientName}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="doctor-cell">${doctorName}</div>
+                            </td>
+                            <td>
+                                <div class="datetime-cell">
+                                    <div class="datetime-main">${dateStr}</div>
+                                    <div>${timeStr}</div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge ${badgeClass}">${statusText}</span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Error rendering appointments:', err);
+                appointmentsList.innerHTML = `
+                    <tr>
+                        <td colspan="4">
+                            <div class="empty-state">
+                                <div class="empty-icon">⚠️</div>
+                                <p>Error displaying appointments list</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
         async function startCall() {
             try {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws`;
+                let wsUrl;
+                if (window.location.protocol === 'file:' || !window.location.host) {
+                    wsUrl = 'ws://localhost:8000/ws';
+                } else {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    wsUrl = `${protocol}//${window.location.host}/ws`;
+                }
                 ws = new WebSocket(wsUrl);
                 ws.binaryType = 'arraybuffer';
 
@@ -181,11 +576,10 @@
                         try {
                             const msg = JSON.parse(event.data);
                             if (msg.type === 'interruption') {
-                                console.log('[Barge-in] Interruption received, clearing audio queue.');
                                 stopAllAudio();
                                 updateStatus('Interrupted - Listening', 'active');
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     } else if (event.data instanceof ArrayBuffer) {
                         playAudioChunk(event.data);
                     }
@@ -243,8 +637,6 @@
                 }
             });
             const source = audioCtx.createMediaStreamSource(micStream);
-
-            // 4096 samples at 16kHz ≈ 256ms per buffer
             scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
             source.connect(scriptProcessor);
             scriptProcessor.connect(audioCtx.destination);
@@ -252,7 +644,6 @@
             scriptProcessor.onaudioprocess = (e) => {
                 if (!isCalling || !ws || ws.readyState !== WebSocket.OPEN) return;
                 const inputData = e.inputBuffer.getChannelData(0);
-                // Convert Float32Array to 16-bit PCM Int16Array
                 const pcm16 = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
                     const s = Math.max(-1, Math.min(1, inputData[i]));
@@ -265,8 +656,7 @@
         function playAudioChunk(arrayBuffer) {
             if (!audioCtx) return;
             updateStatus('Assistant Speaking', 'speaking');
-            
-            // Output audio from Piper TTS is 22050 Hz 16-bit PCM mono
+
             const pcm16 = new Int16Array(arrayBuffer);
             const float32 = new Float32Array(pcm16.length);
             for (let i = 0; i < pcm16.length; i++) {
@@ -305,6 +695,18 @@
                 startCall();
             }
         });
+
+        refreshBtn.addEventListener('click', () => {
+            fetchUpcomingAppointments();
+        });
+
+        // Initial fetch on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', fetchUpcomingAppointments);
+        } else {
+            fetchUpcomingAppointments();
+        }
     </script>
 </body>
+
 </html>

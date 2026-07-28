@@ -40,3 +40,21 @@ def test_normalize_datetime_ambiguous_year_rollover():
     iso_str, reason = normalize_datetime_utterance("January 5th at 10 AM", reference_datetime=ref_dt)
     assert reason is None
     assert iso_str == "2027-01-05T10:00:00Z"
+
+
+def test_year_normalization_defaults_to_reference_year():
+    # Test year missing from utterance defaults to reference datetime year (2026), never 2023
+    ref_dt = datetime(2026, 7, 1, 9, 0, 0, tzinfo=timezone.utc)
+    iso_str, reason = normalize_datetime_utterance("July 28th at 10 AM", reference_datetime=ref_dt)
+    assert reason is None
+    assert iso_str == "2026-07-28T10:00:00Z"
+    assert "2023" not in iso_str
+
+
+def test_year_normalization_roll_forward_past_date():
+    # If today is Dec 31, 2026 and caller says "Jan 1st at 10 AM" (missing year, past date in 2026)
+    ref_dt = datetime(2026, 12, 31, 23, 0, 0, tzinfo=timezone.utc)
+    iso_str, reason = normalize_datetime_utterance("Jan 1st at 10 AM", reference_datetime=ref_dt)
+    assert reason is None
+    assert iso_str == "2027-01-01T10:00:00Z"
+

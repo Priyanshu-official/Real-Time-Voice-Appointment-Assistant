@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputAudioRawFrame,
     TTSAudioRawFrame,
+    TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -127,6 +128,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
     runner = PipelineRunner()
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info("Client connected to voice pipeline, sending initial greeting.")
+        greeting_text = "Hi, thanks for calling in Medical Clinic, how may I help you?"
+        llm_processor.history.append({"role": "assistant", "content": greeting_text})
+        await task.queue_frame(TextFrame(text=greeting_text))
 
     try:
         await runner.run(task)
