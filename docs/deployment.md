@@ -163,6 +163,35 @@ If you have a custom domain managed on Cloudflare:
 
 ---
 
+### Option C: Free Fixed / Reusable Static Link (Without a Custom Domain)
+
+If you don't own a custom domain but want a **permanent fixed link** for sharing (so the URL doesn't change every time you restart), use one of these free alternatives:
+
+#### 1. Free Static Domain via ngrok (Recommended)
+`ngrok` provides **1 free static domain** (e.g. `your-app.ngrok-free.app`) on all free accounts:
+
+1. Create a free account at [ngrok.com](https://ngrok.com).
+2. Copy your authtoken and claim your free static domain from the ngrok dashboard.
+3. Authenticate locally:
+   ```bash
+   ngrok config add-authtoken <YOUR_AUTHTOKEN>
+   ```
+4. Launch ngrok with your reserved static domain:
+   ```bash
+   ngrok http 8000 --url=your-app.ngrok-free.app
+   ```
+*Your share link will remain `https://your-app.ngrok-free.app` permanently across restarts.*
+
+#### 2. Fixed Subdomain via LocalTunnel (No Sign-Up Required)
+If you have Node.js / `npx` installed:
+
+```bash
+npx localtunnel --port 8000 --subdomain clinic-voice-demo
+```
+*Serves at `https://clinic-voice-demo.loca.lt`. As long as the subdomain name is available, the URL remains identical.*
+
+---
+
 ## 🧪 End-to-End Verification Checklist
 
 Perform the following full manual test to confirm the deployment works end-to-end:
