@@ -18,6 +18,28 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build: .
+    container_name: clinic-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-clinic_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-locally}
+      POSTGRES_DB: ${POSTGRES_DB:-clinic}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clinic_app}:${POSTGRES_PASSWORD:-change-me-locally}@postgres:5432/${POSTGRES_DB:-clinic}
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      PIPER_VOICE: ${PIPER_VOICE:-en_US-lessac-medium}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 # Ollama is NOT containerized (see ADR-003 / ADR-006).
 # Docker Desktop on Mac does not pass through Metal GPU acceleration,
 # so Ollama must run natively on the host for real inference speed.
@@ -25,3 +47,4 @@ services:
 
 volumes:
   pgdata:
+
