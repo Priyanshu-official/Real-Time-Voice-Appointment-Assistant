@@ -20,8 +20,9 @@ COPY pyproject.toml ./
 # Install python dependencies using uv
 RUN uv pip install --system -r pyproject.toml || true
 
-# Copy application source code
+# Copy application source code and test eval assets
 COPY app /app/app
+COPY tests /app/tests
 
 # Expose API port
 EXPOSE 8000

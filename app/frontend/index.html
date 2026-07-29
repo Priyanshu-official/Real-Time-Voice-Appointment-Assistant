@@ -712,7 +712,9 @@
                 const baseUrl = (window.location.protocol === 'file:' || !window.location.host)
                     ? 'http://localhost:8000'
                     : `${window.location.protocol}//${window.location.host}`;
-                const res = await fetch(`${baseUrl}/appointments`);
+                const res = await fetch(`${baseUrl}/appointments`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
                 if (!res.ok) {
                     appointmentsList.innerHTML = `
                         <tr>
@@ -854,7 +856,9 @@
                 const baseUrl = (window.location.protocol === 'file:' || !window.location.host)
                     ? 'http://localhost:8000'
                     : `${window.location.protocol}//${window.location.host}`;
-                const res = await fetch(`${baseUrl}/api/eval/scenarios`);
+                const res = await fetch(`${baseUrl}/api/eval/scenarios`, {
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
                 if (!res.ok) {
                     evalScenariosList.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to load scenarios</td></tr>`;
                     return;
@@ -884,7 +888,10 @@
                 const baseUrl = (window.location.protocol === 'file:' || !window.location.host)
                     ? 'http://localhost:8000'
                     : `${window.location.protocol}//${window.location.host}`;
-                const res = await fetch(`${baseUrl}/api/eval/run/${scenarioId}`, { method: 'POST' });
+                const res = await fetch(`${baseUrl}/api/eval/run/${scenarioId}`, {
+                    method: 'POST',
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
                 const result = await res.json();
 
                 let out = `> [SCENARIO RESULT]: ${result.name} (${result.id})\n`;
@@ -921,7 +928,10 @@
                     const baseUrl = (window.location.protocol === 'file:' || !window.location.host)
                         ? 'http://localhost:8000'
                         : `${window.location.protocol}//${window.location.host}`;
-                    const res = await fetch(`${baseUrl}/api/eval/run/${sid}`, { method: 'POST' });
+                    const res = await fetch(`${baseUrl}/api/eval/run/${sid}`, {
+                        method: 'POST',
+                        headers: { 'ngrok-skip-browser-warning': 'true' }
+                    });
                     const result = await res.json();
                     evalConsole.textContent += `   Status: ${result.passed ? '✅ PASS' : '❌ FAIL'} (${result.total_latency_ms} ms)\n`;
                 } catch (e) {
